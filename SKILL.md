@@ -59,6 +59,18 @@ Do NOT manually edit config files. Always use join.sh.
 # Send a message
 ~/.agents/skills/agmsg/scripts/send.sh <team> <from_agent> <to_agent> "<message>"
 
+Turn-mode pane-push: after `send.sh` stores a message, if the recipient has a registered tmux/cmux pane, agmsg-cmux injects an inbox-check prompt into that pane. Set `AGMSG_PANE_PUSH=0` to disable this best-effort push path. Set `AGMSG_PANE_COMMIT_DELAY` to tune the Enter delay used for pane injection.
+
+Pane commands:
+
+```bash
+~/.agents/skills/agmsg/scripts/pane.sh register <team> <name> [type] [project]
+~/.agents/skills/agmsg/scripts/pane.sh status [<team> <name>]
+~/.agents/skills/agmsg/scripts/pane.sh lookup <team> <name>
+~/.agents/skills/agmsg/scripts/pane.sh test <team> <name>
+~/.agents/skills/agmsg/scripts/pane.sh unregister <team> <name>
+```
+
 # Message history
 ~/.agents/skills/agmsg/scripts/history.sh <team> [agent_id] [limit]
 

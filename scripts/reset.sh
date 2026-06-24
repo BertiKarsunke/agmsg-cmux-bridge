@@ -24,6 +24,9 @@ source "$SCRIPT_DIR/lib/actas-lock.sh"
 source "$SCRIPT_DIR/lib/resolve-project.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/storage.sh"
+if [ -f "$SCRIPT_DIR/lib/pane.sh" ]; then
+  source "$SCRIPT_DIR/lib/pane.sh" || true
+fi
 
 # Resolve the session's real project root (see #92) so a drop issued from a
 # subdir/worktree clears the registration on the project the session lives in.
@@ -58,6 +61,17 @@ fi
 
 REMOVED=0
 TOUCHED_TEAMS=0
+
+agmsg_reset_clear_pane() {
+  local team="$1" agent="$2" skill_dir registry_file
+  declare -F agmsg_pane_registry_clear >/dev/null 2>&1 || return 0
+  declare -F agmsg_pane_skill_dir >/dev/null 2>&1 || return 0
+
+  skill_dir="$(agmsg_pane_skill_dir 2>/dev/null)" || return 0
+  registry_file="$skill_dir/run/pane.$team.$agent.json"
+  [ -f "$registry_file" ] || return 0
+  agmsg_pane_registry_clear "$team" "$agent" 2>/dev/null || true
+}
 
 for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
   [ -f "$TEAM_CONFIG" ] || continue
@@ -139,6 +153,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
   REMOVED=$((REMOVED + MATCH_COUNT))
   TOUCHED_TEAMS=$((TOUCHED_TEAMS + 1))
   echo "Cleared $MATCH_COUNT registration(s) for $TARGET_AGENT from $TEAM_NAME"
+  agmsg_reset_clear_pane "$TEAM_NAME" "$TARGET_AGENT" || true
 
   # Release the actas lock for this (team, agent) pair so peer sessions can
   # claim it without waiting for owner-session-end / stale GC.

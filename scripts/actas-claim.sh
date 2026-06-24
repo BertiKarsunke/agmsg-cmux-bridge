@@ -34,6 +34,9 @@ SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"  # actas-lock.sh requires SKILL_DIR
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+if [ -f "$SCRIPT_DIR/lib/pane.sh" ]; then
+  source "$SCRIPT_DIR/lib/pane.sh" || true
+fi
 
 # Resolve the session's real project root (see #92) before any lookup, so an
 # actas issued from a subdir/worktree claims against the registered project
@@ -79,6 +82,18 @@ while IFS= read -r team; do
   esac
   claimed="${claimed:+$claimed$'\n'}$team"
 done <<< "$TEAMS"
+
+agmsg_actas_refresh_panes() {
+  declare -F agmsg_pane_registry_write >/dev/null 2>&1 || return 0
+
+  local team
+  while IFS= read -r team; do
+    [ -z "$team" ] && continue
+    agmsg_pane_registry_write "$team" "$NAME" "$TYPE" "$PROJECT" 2>/dev/null || true
+  done <<< "$TEAMS"
+}
+
+agmsg_actas_refresh_panes || true
 
 # Print a line describing each claimed team. One team per most projects but
 # the underlying model allows multi-team same-name registrations.

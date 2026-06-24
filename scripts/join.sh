@@ -13,6 +13,9 @@ PROJECT_PATH="${4:?Missing project_path}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/type-registry.sh"
+if [ -f "$SCRIPT_DIR/lib/pane.sh" ]; then
+  source "$SCRIPT_DIR/lib/pane.sh" || true
+fi
 
 # Reject unknown agent types — the rest of agmsg (delivery.sh,
 # session-start.sh, identities.sh lookups) only supports registered types
@@ -132,3 +135,23 @@ UPDATED=$(agmsg_sqlite_mem \
 echo "$UPDATED" > "$TEAM_CONFIG"
 
 echo "Joined team $TEAM as $AGENT_ID"
+
+agmsg_join_register_pane() {
+  declare -F agmsg_pane_registry_write >/dev/null 2>&1 || return 0
+  declare -F agmsg_pane_registry_read >/dev/null 2>&1 || return 0
+
+  if ! agmsg_pane_registry_write "$TEAM" "$AGENT_ID" "$AGENT_TYPE" "$PROJECT_PATH" 2>/dev/null; then
+    return 0
+  fi
+
+  local info backend addr project type
+  if ! info="$(agmsg_pane_registry_read "$TEAM" "$AGENT_ID" 2>/dev/null)"; then
+    return 0
+  fi
+
+  IFS=$'\t' read -r backend addr project type <<< "$info"
+  [ -n "$backend" ] && [ -n "$addr" ] || return 0
+  echo "Pane registered for $AGENT_ID: $backend $addr (turn-mode push enabled)"
+}
+
+agmsg_join_register_pane || true
