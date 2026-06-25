@@ -36,25 +36,35 @@ agmsg_send_pane_push() {
   [ "${AGMSG_PANE_PUSH:-1}" != "0" ] || return 0
   [ "$FROM" != "$TO" ] || return 0
   declare -F agmsg_pane_registry_read >/dev/null 2>&1 || return 0
+  declare -F agmsg_pane_registry_field >/dev/null 2>&1 || return 0
   declare -F agmsg_pane_skill_dir >/dev/null 2>&1 || return 0
   declare -F agmsg_pane_alive >/dev/null 2>&1 || return 0
   declare -F agmsg_pane_inject >/dev/null 2>&1 || return 0
 
-  local info backend addr project type wake skill_dir registry_file
+  local info backend addr socket wake skill_dir registry_file
   skill_dir="$(agmsg_pane_skill_dir 2>/dev/null)" || return 0
   registry_file="$skill_dir/run/pane.$TEAM.$TO.json"
-  [ -f "$registry_file" ] || return 0
-
-  if ! info="$(agmsg_pane_registry_read "$TEAM" "$TO" 2>/dev/null)"; then
+  if [ ! -f "$registry_file" ]; then
+    echo "pane-push: no pane registered for $TO (delivered via inbox only)"
     return 0
   fi
 
-  IFS=$'\t' read -r backend addr project type <<< "$info"
-  [ -n "$backend" ] && [ -n "$addr" ] || return 0
+  if ! info="$(agmsg_pane_registry_read "$TEAM" "$TO" 2>/dev/null)"; then
+    echo "pane-push: no pane registered for $TO (delivered via inbox only)"
+    return 0
+  fi
 
-  if agmsg_pane_alive "$backend" "$addr" 2>/dev/null; then
+  backend="$(agmsg_pane_registry_field "$info" 1)"
+  addr="$(agmsg_pane_registry_field "$info" 2)"
+  socket="$(agmsg_pane_registry_field "$info" 5)"
+  if [ -z "$backend" ] || [ -z "$addr" ]; then
+    echo "pane-push: no pane registered for $TO (delivered via inbox only)"
+    return 0
+  fi
+
+  if agmsg_pane_alive "$backend" "$addr" "$socket" 2>/dev/null; then
     wake="[agmsg-cmux] '$FROM' sent you a new agmsg message (team=$TEAM). Run your agmsg skill to read the inbox and handle it now."
-    if agmsg_pane_inject "$backend" "$addr" "$wake" 2>/dev/null; then
+    if agmsg_pane_inject "$backend" "$addr" "$wake" "$socket" 2>/dev/null; then
       echo "pane-push: nudged $TO ($backend $addr)"
     fi
   else

@@ -9,6 +9,7 @@ load test_helper
 
 setup() {
   setup_test_env
+  export AGMSG_PANE_BACKEND=none
   export PROJ="/tmp/agmsg-watch-proj"
   bash "$SCRIPTS/join.sh" team alice claude-code "$PROJ" >/dev/null
 }
@@ -73,6 +74,40 @@ _wait_for_file_contains() {
     sleep 0.1
   done
   return 1
+}
+
+@test "watch: self-registers pane for subscribed roles and honors actas active name" {
+  bash "$SCRIPTS/join.sh" team bob claude-code "$PROJ" >/dev/null
+
+  AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:42 AGMSG_WATCH_INTERVAL=5 \
+    bash "$SCRIPTS/watch.sh" "sess-pane-broad" "$PROJ" claude-code >/dev/null 2>&1 &
+  local broad=$!
+  _wait_for_file "$TEST_SKILL_DIR/run/pane.team.alice.json"
+  _wait_for_file "$TEST_SKILL_DIR/run/pane.team.bob.json"
+  kill "$broad" 2>/dev/null || true
+  wait "$broad" 2>/dev/null || true
+
+  run bash "$SCRIPTS/pane.sh" lookup team alice
+  [ "$status" -eq 0 ]
+  [ "$output" = $'cmux\tsurface:42\t/tmp/agmsg-watch-proj\tclaude-code\t' ]
+  run bash "$SCRIPTS/pane.sh" lookup team bob
+  [ "$status" -eq 0 ]
+  [ "$output" = $'cmux\tsurface:42\t/tmp/agmsg-watch-proj\tclaude-code\t' ]
+
+  rm -f "$TEST_SKILL_DIR/run/pane.team.alice.json" "$TEST_SKILL_DIR/run/pane.team.bob.json"
+
+  AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:99 AGMSG_WATCH_INTERVAL=5 \
+    bash "$SCRIPTS/watch.sh" "sess-pane-active" "$PROJ" claude-code alice >/dev/null 2>&1 &
+  local active=$!
+  _wait_for_file "$TEST_SKILL_DIR/run/pane.team.alice.json"
+  kill "$active" 2>/dev/null || true
+  wait "$active" 2>/dev/null || true
+
+  run bash "$SCRIPTS/pane.sh" lookup team alice
+  [ "$status" -eq 0 ]
+  [ "$output" = $'cmux\tsurface:99\t/tmp/agmsg-watch-proj\tclaude-code\t' ]
+  run bash "$SCRIPTS/pane.sh" lookup team bob
+  [ "$status" -ne 0 ]
 }
 
 @test "watch: restart delivers messages that arrived while the watcher was down" {

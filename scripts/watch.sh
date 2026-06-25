@@ -42,6 +42,7 @@ source "$SCRIPT_DIR/lib/storage.sh"
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+source "$SCRIPT_DIR/lib/pane.sh"
 
 # Resolve the session's real project root (see #92). The actas/drop/ensure-
 # monitor flows relaunch this watcher with a raw "$(pwd)"; without resolution a
@@ -198,6 +199,18 @@ if [ -z "$PAIRS" ]; then
   fi
   exit 0
 fi
+
+agmsg_watch_register_panes() {
+  declare -F agmsg_pane_registry_write >/dev/null 2>&1 || return 0
+
+  local _team _agent
+  while IFS=$'\t' read -r _team _agent; do
+    [ -z "$_team" ] && continue
+    agmsg_pane_registry_write "$_team" "$_agent" "$AGENT_TYPE" "$PROJECT_PATH" >/dev/null 2>&1 || true
+  done <<< "$PAIRS"
+}
+
+agmsg_watch_register_panes || true
 
 # Build the SQL WHERE clause. Each pair contributes:
 #   (team='<team>' AND to_agent='<agent>')

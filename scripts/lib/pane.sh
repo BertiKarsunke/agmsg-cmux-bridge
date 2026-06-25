@@ -68,6 +68,11 @@ agmsg_pane_backend() {
     return 0
   fi
 
+  if command -v wezterm >/dev/null 2>&1 && [ -n "${WEZTERM_PANE:-}" ]; then
+    printf 'wezterm\n'
+    return 0
+  fi
+
   printf 'none\n'
 }
 
@@ -99,8 +104,24 @@ agmsg_pane_self() {
       [ -n "${CMUX_SURFACE_ID:-}" ] || return 1
       printf '%s\n' "$CMUX_SURFACE_ID"
       ;;
+    wezterm)
+      [ -n "${WEZTERM_PANE:-}" ] || return 1
+      printf '%s\n' "$WEZTERM_PANE"
+      ;;
     *)
       return 1
+      ;;
+  esac
+}
+
+agmsg_pane_socket() {
+  local backend="${1:-}"
+  case "$backend" in
+    wezterm)
+      printf '%s\n' "${WEZTERM_UNIX_SOCKET:-${KAKU_UNIX_SOCKET:-}}"
+      ;;
+    *)
+      printf '\n'
       ;;
   esac
 }
@@ -120,6 +141,7 @@ agmsg_pane_inject() {
   local backend="${1:?Usage: agmsg_pane_inject BACKEND ADDR TEXT}"
   local addr="${2:?Missing pane address}"
   local text="${3-}"
+  local socket="${4:-}"
   local delay
   delay="$(agmsg_pane_commit_delay)" || return 1
 
@@ -138,6 +160,13 @@ agmsg_pane_inject() {
       sleep "$delay"
       cmux send-key --surface "$addr" -- Enter
       ;;
+    wezterm)
+      agmsg_pane_wezterm "$socket" cli send-text --pane-id "$addr" --no-paste -- "$text" || return 1
+      sleep "$delay"
+      printf '\r' | agmsg_pane_wezterm "$socket" cli send-text --pane-id "$addr" --no-paste || return 1
+      sleep "$delay"
+      printf '\r' | agmsg_pane_wezterm "$socket" cli send-text --pane-id "$addr" --no-paste
+      ;;
     *)
       echo "agmsg pane: unsupported backend: $backend" >&2
       return 1
@@ -145,9 +174,20 @@ agmsg_pane_inject() {
   esac
 }
 
+agmsg_pane_wezterm() {
+  local socket="$1"
+  shift
+  if [ -n "$socket" ]; then
+    WEZTERM_UNIX_SOCKET="$socket" wezterm "$@"
+  else
+    wezterm "$@"
+  fi
+}
+
 agmsg_pane_alive() {
   local backend="${1:?Usage: agmsg_pane_alive BACKEND ADDR}"
   local addr="${2:?Missing pane address}"
+  local socket="${3:-}"
 
   case "$backend" in
     tmux)
@@ -158,6 +198,23 @@ agmsg_pane_alive() {
       command -v cmux >/dev/null 2>&1 || return 1
       cmux read-screen --surface "$addr" >/dev/null 2>&1 && return 0
       cmux list-panels 2>/dev/null | grep -F -- "$addr" >/dev/null
+      ;;
+    wezterm)
+      command -v wezterm >/dev/null 2>&1 || return 1
+      local panes found
+      if panes="$(agmsg_pane_wezterm "$socket" cli list --format json 2>/dev/null)"; then
+        found="$(sqlite3 :memory: \
+          ".param set :json '$(agmsg_pane_sql_quote "$panes")'" \
+          ".param set :addr '$(agmsg_pane_sql_quote "$addr")'" \
+          "SELECT EXISTS(
+             SELECT 1
+             FROM json_each(:json)
+             WHERE CAST(COALESCE(json_extract(value, '$.pane_id'), json_extract(value, '$.paneId'), '') AS TEXT) = :addr
+           );" 2>/dev/null | tr -d '\r' || true)"
+        [ "$found" = "1" ] && return 0
+      fi
+      panes="$(agmsg_pane_wezterm "$socket" cli list 2>/dev/null)" || return 1
+      printf '%s\n' "$panes" | grep -E "(^|[[:space:]])${addr}($|[[:space:]])" >/dev/null
       ;;
     *)
       return 1
@@ -181,6 +238,7 @@ agmsg_pane_registry_json() {
   local project="$3"
   local type="$4"
   local registered_at="$5"
+  local socket="$6"
 
   if command -v sqlite3 >/dev/null 2>&1; then
     sqlite3 :memory: \
@@ -189,7 +247,8 @@ agmsg_pane_registry_json() {
       ".param set :project '$(agmsg_pane_sql_quote "$project")'" \
       ".param set :type '$(agmsg_pane_sql_quote "$type")'" \
       ".param set :registered_at '$(agmsg_pane_sql_quote "$registered_at")'" \
-      "SELECT json_object('backend', :backend, 'addr', :addr, 'project', :project, 'type', :type, 'registered_at', :registered_at);" | tr -d '\r'
+      ".param set :socket '$(agmsg_pane_sql_quote "$socket")'" \
+      "SELECT json_object('backend', :backend, 'addr', :addr, 'project', :project, 'type', :type, 'registered_at', :registered_at, 'socket', :socket);" | tr -d '\r'
     return 0
   fi
 
@@ -201,19 +260,40 @@ agmsg_pane_registry_write() {
   local name="${2:?Missing agent name}"
   local type="${3:-}"
   local project="${4:-$(pwd)}"
-  local backend addr path registered_at json
+  local backend addr path registered_at json socket
 
   backend="$(agmsg_pane_backend)"
   [ -n "$backend" ] && [ "$backend" != "none" ] || return 1
 
   addr="$(agmsg_pane_self "$backend" 2>/dev/null)" || return 1
   [ -n "$addr" ] || return 1
+  socket="$(agmsg_pane_socket "$backend")"
 
   path="$(agmsg_pane_registry_path "$team" "$name")" || return 1
   registered_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  json="$(agmsg_pane_registry_json "$backend" "$addr" "$project" "$type" "$registered_at")" || return 1
+  json="$(agmsg_pane_registry_json "$backend" "$addr" "$project" "$type" "$registered_at" "$socket")" || return 1
 
   printf '%s\n' "$json" > "$path"
+}
+
+agmsg_pane_registry_field() {
+  local line="$1"
+  local index="$2"
+  local tab rest i
+  tab="$(printf '\t')"
+  rest="$line"
+  i=1
+  while [ "$i" -lt "$index" ]; do
+    case "$rest" in
+      *"$tab"*) rest="${rest#*$tab}" ;;
+      *) printf '\n'; return 0 ;;
+    esac
+    i=$((i + 1))
+  done
+  case "$rest" in
+    *"$tab"*) printf '%s\n' "${rest%%$tab*}" ;;
+    *) printf '%s\n' "$rest" ;;
+  esac
 }
 
 agmsg_pane_registry_read() {
@@ -232,7 +312,8 @@ agmsg_pane_registry_read() {
        COALESCE(json_extract(readfile('$sql_path'), '$.backend'), ''),
        COALESCE(json_extract(readfile('$sql_path'), '$.addr'), ''),
        COALESCE(json_extract(readfile('$sql_path'), '$.project'), ''),
-       COALESCE(json_extract(readfile('$sql_path'), '$.type'), '');" | tr -d '\r'
+       COALESCE(json_extract(readfile('$sql_path'), '$.type'), ''),
+       COALESCE(json_extract(readfile('$sql_path'), '$.socket'), '');" | tr -d '\r'
 }
 
 agmsg_pane_registry_clear() {

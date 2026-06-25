@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-25
+
+### Fixed
+- Turn-mode agents (codex, gemini, copilot, cursor, opencode, antigravity, hermes) now re-register their current pane on `actas`, so pane-push reaches the live pane even when the role moved panes or sessions. Previously, only a brand-new join registered the pane; an existing role's `actas` left a stale registration and sends printed "pane not alive, skipped". Claude Code already refreshes this path through `actas-claim.sh`.
+
 ## [1.1.0] - 2026-06-22
 
 ### Added
@@ -123,10 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handle empty TaskList explicitly to stop fresh-session loop (#71)
 - Storage driver pluginization design (epic #51) (#52)
 
+[1.2.0]: https://github.com/fujibee/agmsg/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fujibee/agmsg/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/fujibee/agmsg/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/fujibee/agmsg/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/fujibee/agmsg/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/fujibee/agmsg/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/fujibee/agmsg/releases/tag/v1.0.2
-

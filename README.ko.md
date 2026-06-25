@@ -13,14 +13,15 @@ agmsg-cmux는 `fujibee/agmsg`의 포크로, tmux/cmux turn-mode pane-push를 추
 Pane 등록은 role 생명주기를 따릅니다.
 
 - `scripts/join.sh`는 에이전트가 팀에 join한 뒤 현재 pane 등록을 시도합니다.
-- `scripts/actas-claim.sh`는 `actas` claim이 성공한 뒤 현재 pane으로 등록을 갱신합니다.
+- Claude Code 경로에서는 `scripts/actas-claim.sh`가 `actas` claim이 성공한 뒤 현재 pane으로 등록을 갱신합니다.
+- Codex, Gemini, Copilot, Cursor, OpenCode, Antigravity, Hermes 같은 turn-mode 에이전트는 각자의 `actas` skill 명령 흐름에서 `scripts/pane.sh register`로 현재 pane을 다시 등록합니다.
 - reset/drop 흐름에서 쓰이는 `scripts/reset.sh`는 제거된 role의 pane 등록을 해제합니다.
 
 이를 통해 agmsg-cmux는 role이 join, switch, drop 되는 과정에 맞춰 살아 있는 pane을 추적합니다.
 
 ## 동작 방식
 
-Pane 지원은 `scripts/lib/pane.sh`와 `scripts/pane.sh`에 있습니다. 백엔드는 자동 감지됩니다. tmux는 `$TMUX`와 `tmux`가 사용 가능할 때 `$TMUX_PANE`을 사용합니다. cmux는 `cmux identify --json`의 `caller.surface_ref` 값을 사용하고, 필요하면 `$CMUX_SURFACE_ID`를 fallback으로 사용합니다.
+Pane 지원은 `scripts/lib/pane.sh`와 `scripts/pane.sh`에 있습니다. 백엔드는 자동 감지됩니다. tmux는 `$TMUX`와 `tmux`가 사용 가능할 때 `$TMUX_PANE`을 사용합니다. cmux는 `cmux identify --json`의 `caller.surface_ref` 값을 사용하고, 필요하면 `$CMUX_SURFACE_ID`를 fallback으로 사용합니다. WezTerm/Kaku는 `$WEZTERM_PANE`으로 감지하고 `$WEZTERM_UNIX_SOCKET` 또는 `$KAKU_UNIX_SOCKET` 소켓을 사용합니다.
 
 등록 정보는 설치된 skill 디렉터리 아래에 다음 형식으로 저장됩니다.
 

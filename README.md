@@ -13,14 +13,15 @@ The original agmsg stores and reads messages through local scripts and SQLite. T
 Pane registrations follow the role lifecycle:
 
 - `scripts/join.sh` tries to register the current pane after the agent joins a team.
-- `scripts/actas-claim.sh` refreshes the registration to the current pane after an `actas` claim succeeds.
+- For Claude Code, `scripts/actas-claim.sh` refreshes the registration to the current pane after an `actas` claim succeeds.
+- Turn-mode agents such as Codex, Gemini, Copilot, Cursor, OpenCode, Antigravity, and Hermes re-register the current pane with `scripts/pane.sh register` inside their own `actas` skill command flow.
 - `scripts/reset.sh`, used by reset/drop flows, clears the pane registration for the removed role.
 
 That lets agmsg-cmux track the live pane for a role as the role joins, switches, and drops.
 
 ## How It Works
 
-Pane support lives in `scripts/lib/pane.sh` and `scripts/pane.sh`. The backend is detected automatically: tmux uses `$TMUX_PANE` when `$TMUX` and `tmux` are available; cmux uses `cmux identify --json` and its `caller.surface_ref` value, with `$CMUX_SURFACE_ID` as a fallback.
+Pane support lives in `scripts/lib/pane.sh` and `scripts/pane.sh`. The backend is detected automatically: tmux uses `$TMUX_PANE` when `$TMUX` and `tmux` are available; cmux uses `cmux identify --json` and its `caller.surface_ref` value, with `$CMUX_SURFACE_ID` as a fallback; WezTerm/Kaku uses `$WEZTERM_PANE` and the `$WEZTERM_UNIX_SOCKET` or `$KAKU_UNIX_SOCKET` socket.
 
 Registrations are written under the installed skill directory as:
 
