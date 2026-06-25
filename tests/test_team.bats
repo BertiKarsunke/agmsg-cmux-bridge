@@ -4,6 +4,7 @@ load test_helper
 
 setup() {
   setup_test_env
+  export AGMSG_PANE_PUSH=0
 }
 
 teardown() {
@@ -40,6 +41,46 @@ teardown() {
   [[ "$output" =~ "alice" ]]
   [[ "$output" =~ "1 member" ]]
   [[ "$output" =~ "+1 more" ]]
+}
+
+@test "join: announces newly joined members to planner" {
+  bash "$SCRIPTS/join.sh" myteam planner claude-code /tmp/proj-planner
+  bash "$SCRIPTS/join.sh" myteam executor codex /tmp/proj-executor
+  run bash "$SCRIPTS/inbox.sh" myteam planner
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "1 new message" ]]
+  [[ "$output" == *"[JOIN] executor (codex) joined team myteam"* ]]
+  [[ "$output" == *"project=/tmp/proj-executor"* ]]
+}
+
+@test "join: does not announce when join announcements are disabled" {
+  bash "$SCRIPTS/join.sh" myteam planner claude-code /tmp/proj-planner
+  AGMSG_ANNOUNCE_JOIN=0 bash "$SCRIPTS/join.sh" myteam executor codex /tmp/proj-executor
+  run bash "$SCRIPTS/inbox.sh" myteam planner
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "No new messages." ]]
+}
+
+@test "join: does not announce existing members rejoining" {
+  bash "$SCRIPTS/join.sh" myteam planner claude-code /tmp/proj-planner
+  bash "$SCRIPTS/join.sh" myteam executor codex /tmp/proj-executor
+  bash "$SCRIPTS/inbox.sh" myteam planner >/dev/null
+  bash "$SCRIPTS/join.sh" myteam executor codex /tmp/proj-executor-2
+  run bash "$SCRIPTS/inbox.sh" myteam planner
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "No new messages." ]]
+}
+
+@test "join: does not announce when planner is absent or is the joining member" {
+  bash "$SCRIPTS/join.sh" noleader executor codex /tmp/proj-executor
+  run bash "$SCRIPTS/inbox.sh" noleader planner
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "No new messages." ]]
+
+  bash "$SCRIPTS/join.sh" selfteam planner claude-code /tmp/proj-planner
+  run bash "$SCRIPTS/inbox.sh" selfteam planner
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "No new messages." ]]
 }
 
 # --- leave.sh ---
@@ -189,7 +230,15 @@ teardown() {
 
 @test "whoami: defaults to claude-code when no env vars set" {
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj
-  run bash "$SCRIPTS/whoami.sh" /tmp/proj
+  unset CLAUDE_CODE_SESSION_ID CODEX_SANDBOX CODEX_THREAD_ID GEMINI_API_KEY GOOGLE_GEMINI_CLI
+  local fake_bin="$BATS_TEST_TMPDIR/no-proc-detect-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/ps" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$fake_bin/ps"
+  PATH="$fake_bin:$PATH" run bash "$SCRIPTS/whoami.sh" /tmp/proj
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=alice" ]]
   [[ "$output" =~ "type=claude-code" ]]

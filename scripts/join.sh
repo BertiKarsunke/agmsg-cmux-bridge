@@ -76,8 +76,10 @@ EXISTING=$(agmsg_sqlite_mem "
 ")
 
 if [ -z "$EXISTING" ] || [ "$EXISTING" = "null" ]; then
+  AGENT_WAS_NEW=1
   AGENT_OBJ=$(sqlite3 :memory: "SELECT json_object('registrations', json_array(json('$REGISTRATION_ESCAPED')));")
 else
+  AGENT_WAS_NEW=0
   EXISTING_ESCAPED=$(printf '%s' "$EXISTING" | sed "s/'/''/g")
   NORMALIZED=$(agmsg_sqlite_mem "
     WITH agent(a) AS (SELECT '$EXISTING_ESCAPED')
@@ -154,4 +156,33 @@ agmsg_join_register_pane() {
   echo "Pane registered for $AGENT_ID: $backend $addr (turn-mode push enabled)"
 }
 
+agmsg_join_announce() {
+  [ "${AGMSG_ANNOUNCE_JOIN:-1}" != "0" ] || return 0
+  [ "${AGENT_WAS_NEW:-0}" = "1" ] || return 0
+
+  local leader="${AGMSG_TEAM_LEADER:-planner}"
+  [ -n "$leader" ] || return 0
+  [ "$leader" != "$AGENT_ID" ] || return 0
+
+  local leader_sql leader_exists
+  leader_sql=$(printf '%s' "$leader" | sed "s/'/''/g")
+  leader_exists=$(agmsg_sqlite_mem "
+    WITH cfg AS (SELECT CAST(readfile('$CONFIG_SQL') AS TEXT) AS json)
+    SELECT EXISTS(
+      SELECT 1
+      FROM cfg, json_each(json_extract(cfg.json, '\$.agents'))
+      WHERE key = '$leader_sql'
+    );
+  " 2>/dev/null || true)
+  [ "$leader_exists" = "1" ] || return 0
+
+  bash "$SCRIPT_DIR/send.sh" \
+    "$TEAM" \
+    "$AGENT_ID" \
+    "$leader" \
+    "[JOIN] $AGENT_ID ($AGENT_TYPE) joined team $TEAM — project=$PROJECT_PATH" \
+    >/dev/null 2>&1 || true
+}
+
 agmsg_join_register_pane || true
+agmsg_join_announce || true
