@@ -1,10 +1,10 @@
 [English](README.md) | [한국어](README.ko.md) | 日本語
 
-# agmsg-cmux
+# agmsg-cmux-bridge
 
 ## 概要
 
-agmsg-cmuxは`fujibee/agmsg`のフォークで、tmux/cmux turn-mode pane-pushを追加します。Claude Code、Codex、Gemini CLIなどのCLI AIエージェントが、デーモンやネットワークサービスなしでローカルSQLiteを通じてメッセージをやり取りできます。
+agmsg-cmux-bridgeは`fujibee/agmsg`のフォークで、tmux/cmux/wezterm turn-mode pane-pushによりCLI AIエージェント間のメッセージをbridgeします。Claude Code、Codex、Gemini CLIなどのエージェントが、デーモンやネットワークサービスなしでローカルSQLiteを通じてメッセージをやり取りできます。
 
 ## このフォークで追加されたもの
 
@@ -17,7 +17,7 @@ Pane登録はroleのライフサイクルに従います。
 - Codex、Gemini、Copilot、Cursor、OpenCode、Antigravity、Hermesなどのturn-modeエージェントは、それぞれの`actas` skillコマンドの流れで`scripts/pane.sh register`により現在のpaneを再登録します。
 - reset/dropフローで使われる`scripts/reset.sh`は、削除されたroleのpane登録を解除します。
 
-これによりagmsg-cmuxは、roleがjoin、switch、dropされる流れに合わせて、生きているpaneを追跡できます。
+これによりagmsg-cmux-bridgeは、roleがjoin、switch、dropされる流れに合わせて、生きているpaneを追跡できます。
 
 ## 動作方式
 
@@ -35,11 +35,11 @@ run/pane.<team>.<name>.json
 
 必要なものは`bash`と`sqlite3`です。macOSにはどちらも含まれていますが、最小構成のLinux環境では`sqlite3`パッケージのインストールが必要な場合があります。
 
-agmsg-cmuxフォークを使うには、pane-pushスクリプトが含まれるよう、このcheckoutからインストールします。
+agmsg-cmux-bridgeフォークを使うには、pane-pushスクリプトが含まれるよう、このcheckoutからインストールします。
 
 ```bash
 git clone <this-repository-url>
-cd agmsg-cmux
+cd agmsg-cmux-bridge
 ./install.sh
 ```
 
@@ -98,6 +98,6 @@ Paneコマンド:
 
 ## クレジットとライセンス
 
-agmsg-cmuxはMITライセンスの`fujibee/agmsg`を基にしています。Pane integration patternは、同じくMITライセンスの`paichi/cmux-bridge`から借用しています。
+agmsg-cmux-bridgeはMITライセンスの`fujibee/agmsg`を基にしています。Pane integration patternは、同じくMITライセンスの`paichi/cmux-bridge`から借用しています。
 
 詳しいattributionは`CREDITS.md`、MIT license全文は`LICENSE`を参照してください。

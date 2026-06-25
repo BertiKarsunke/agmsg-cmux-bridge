@@ -1,10 +1,10 @@
 English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
-# agmsg-cmux
+# agmsg-cmux-bridge
 
 ## Summary
 
-agmsg-cmux is a fork of `fujibee/agmsg` that adds tmux/cmux turn-mode pane-push: CLI AI agents such as Claude Code, Codex, and Gemini CLI can message each other through local SQLite without a daemon or network service.
+agmsg-cmux-bridge is a fork of `fujibee/agmsg` that bridges CLI AI agents with tmux/cmux/wezterm turn-mode pane-push: Claude Code, Codex, Gemini CLI, and other agents can message each other through local SQLite without a daemon or network service.
 
 ## What This Fork Adds
 
@@ -17,7 +17,7 @@ Pane registrations follow the role lifecycle:
 - Turn-mode agents such as Codex, Gemini, Copilot, Cursor, OpenCode, Antigravity, and Hermes re-register the current pane with `scripts/pane.sh register` inside their own `actas` skill command flow.
 - `scripts/reset.sh`, used by reset/drop flows, clears the pane registration for the removed role.
 
-That lets agmsg-cmux track the live pane for a role as the role joins, switches, and drops.
+That lets agmsg-cmux-bridge track the live pane for a role as the role joins, switches, and drops.
 
 ## How It Works
 
@@ -35,11 +35,11 @@ Each record stores the backend, pane address, project, agent type, and registrat
 
 Requirements: `bash` and `sqlite3`. macOS includes both; minimal Linux environments may need a package such as `sqlite3`.
 
-For the agmsg-cmux fork, install from this checkout so the pane-push scripts are included:
+For the agmsg-cmux-bridge fork, install from this checkout so the pane-push scripts are included:
 
 ```bash
 git clone <this-repository-url>
-cd agmsg-cmux
+cd agmsg-cmux-bridge
 ./install.sh
 ```
 
@@ -98,6 +98,6 @@ Command summary:
 
 ## Credits and License
 
-agmsg-cmux is based on `fujibee/agmsg`, licensed under MIT. The pane integration pattern is borrowed from `paichi/cmux-bridge`, also licensed under MIT.
+agmsg-cmux-bridge is based on `fujibee/agmsg`, licensed under MIT. The pane integration pattern is borrowed from `paichi/cmux-bridge`, also licensed under MIT.
 
 See `CREDITS.md` for attribution details and `LICENSE` for the MIT license text.
