@@ -89,10 +89,14 @@ Paneコマンド:
 - `pane.sh test`: 登録済みの生きているpaneへtest pingを注入します。
 - `pane.sh unregister`: roleのpane登録を削除します。
 
+1つのprojectは複数のteamに所属できます。monitorとturn-mode deliveryは、そのprojectに登録されたすべての`(team, agent)`ペアを処理します。
+
 ## 環境変数
 
 | 変数 | デフォルト | 目的 |
 | --- | --- | --- |
+| `AGMSG_TEAM_LEADER` | `planner` | 新しいmemberまたはroleがteamにjoinしたときに`[JOIN]` inbox通知を受け取るagent名です。 |
+| `AGMSG_ANNOUNCE_JOIN` | `1` | `0`に設定するとjoin announcement通知を無効化します。 |
 | `AGMSG_PANE_PUSH` | `1` | `0`に設定すると、通常のSQLite messagingは維持したまま、send時のpane注入を無効化します。 |
 | `AGMSG_PANE_COMMIT_DELAY` | `0.4` | プロンプトをcommitするため、注入テキストと2回のEnter送信の間に待つ時間(秒)です。 |
 

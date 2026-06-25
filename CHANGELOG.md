@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-25
+
+### Added
+- Join announcements: when a new member or role joins (a fresh join, or an `actas` that creates a new role; both route through `join.sh`), the team leader (`AGMSG_TEAM_LEADER`, default `planner`) gets a `[JOIN]` inbox notice. Disable with `AGMSG_ANNOUNCE_JOIN=0`.
+
+### Fixed
+- Multi-team turn-mode delivery: `check-inbox.sh` now polls every `(team, agent)` pair for the project (via `identities.sh`, the same source `watch.sh` uses) instead of one agent name across all teams. An agent joined under different names per team no longer misses messages; the header shows `(as <agent>)` when a project has more than one identity.
+
 ## [1.2.0] - 2026-06-25
 
 ### Fixed
@@ -128,6 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handle empty TaskList explicitly to stop fresh-session loop (#71)
 - Storage driver pluginization design (epic #51) (#52)
 
+[1.3.0]: https://github.com/fujibee/agmsg/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/fujibee/agmsg/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/fujibee/agmsg/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/fujibee/agmsg/compare/v1.0.5...v1.0.6

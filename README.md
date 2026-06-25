@@ -89,10 +89,14 @@ Command summary:
 - `pane.sh test`: injects a test ping into the registered live pane.
 - `pane.sh unregister`: removes the pane registration for a role.
 
+A project can belong to multiple teams; monitor and turn-mode delivery both process every `(team, agent)` pair registered for that project.
+
 ## Environment Variables
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `AGMSG_TEAM_LEADER` | `planner` | Agent name that receives `[JOIN]` inbox notices when a new member or role joins a team. |
+| `AGMSG_ANNOUNCE_JOIN` | `1` | Set to `0` to disable join announcement notices. |
 | `AGMSG_PANE_PUSH` | `1` | Set to `0` to disable send-time pane injection while keeping normal SQLite messaging. |
 | `AGMSG_PANE_COMMIT_DELAY` | `0.4` | Delay, in seconds, between injected text and the two Enter key sends used to commit the prompt. |
 

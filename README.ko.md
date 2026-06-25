@@ -89,10 +89,14 @@ Pane 명령:
 - `pane.sh test`: 등록된 살아 있는 pane에 test ping을 주입합니다.
 - `pane.sh unregister`: role의 pane 등록을 제거합니다.
 
+하나의 project는 여러 team에 속할 수 있으며, monitor와 turn-mode delivery는 해당 project에 등록된 모든 `(team, agent)` 쌍을 처리합니다.
+
 ## 환경변수
 
 | 변수 | 기본값 | 목적 |
 | --- | --- | --- |
+| `AGMSG_TEAM_LEADER` | `planner` | 새 member나 role이 team에 join할 때 `[JOIN]` inbox 알림을 받을 agent 이름입니다. |
+| `AGMSG_ANNOUNCE_JOIN` | `1` | `0`으로 설정하면 join announcement 알림을 비활성화합니다. |
 | `AGMSG_PANE_PUSH` | `1` | `0`으로 설정하면 일반 SQLite 메시징은 유지하면서 send 시점의 pane 주입을 비활성화합니다. |
 | `AGMSG_PANE_COMMIT_DELAY` | `0.4` | 프롬프트를 commit하기 위해 주입 텍스트와 두 번의 Enter 전송 사이에 기다리는 시간(초)입니다. |
 
