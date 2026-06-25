@@ -1,6 +1,6 @@
 ---
-name: agmsg-cmux
-description: Cross-agent messaging via SQLite. Send messages between Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, and other agents. No daemon, no network, no dependencies beyond bash and sqlite3. Adds turn-mode pane-push for tmux/cmux.
+name: agmsg-cmux-bridge
+description: Cross-agent messaging via SQLite. Send messages between Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, and other agents. No daemon, no network, no dependencies beyond bash and sqlite3. Adds turn-mode pane-push for tmux/cmux/wezterm.
 ---
 
 # Agent Messaging
@@ -59,7 +59,7 @@ Do NOT manually edit config files. Always use join.sh.
 # Send a message
 ~/.agents/skills/agmsg/scripts/send.sh <team> <from_agent> <to_agent> "<message>"
 
-Turn-mode pane-push: after `send.sh` stores a message, if the recipient has a registered tmux/cmux pane, agmsg-cmux injects an inbox-check prompt into that pane. Set `AGMSG_PANE_PUSH=0` to disable this best-effort push path. Set `AGMSG_PANE_COMMIT_DELAY` to tune the Enter delay used for pane injection.
+Turn-mode pane-push: after `send.sh` stores a message, if the recipient has a registered tmux/cmux pane, agmsg-cmux-bridge injects an inbox-check prompt into that pane. Set `AGMSG_PANE_PUSH=0` to disable this best-effort push path. Set `AGMSG_PANE_COMMIT_DELAY` to tune the Enter delay used for pane injection.
 
 Pane commands:
 

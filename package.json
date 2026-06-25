@@ -1,5 +1,5 @@
 {
-  "name": "agmsg-cmux",
+  "name": "agmsg-cmux-bridge",
   "version": "1.1.0",
   "description": "Fork of agmsg adding tmux/cmux turn-mode pane-push. Cross-agent messaging via SQLite for CLI AI agents (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, Antigravity, OpenCode). Original agmsg by fujibee.",
   "bin": {
