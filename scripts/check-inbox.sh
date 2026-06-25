@@ -60,29 +60,19 @@ if [ -n "$SESSION_ID" ]; then
   fi
 fi
 
-# Identify agent and teams
-WHOAMI=$("$SCRIPT_DIR/whoami.sh" "$PROJECT" "$TYPE")
-if echo "$WHOAMI" | grep -q "not_joined=true"; then
+PROJECT="$(agmsg_resolve_project "$PROJECT" "$TYPE")"
+PAIRS="$("$SCRIPT_DIR/identities.sh" "$PROJECT" "$TYPE")"
+if [ -z "$PAIRS" ]; then
   exit 0
 fi
-
-# Handle multiple identities: use first agent name
-if echo "$WHOAMI" | grep -q "multiple=true"; then
-  AGENT=$(echo "$WHOAMI" | sed -n 's/.*agents=\([^,]*\).*/\1/p')
-else
-  AGENT=$(echo "$WHOAMI" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')
-fi
-TEAMS=$(echo "$WHOAMI" | sed -n 's/.*teams=\([^ ]*\).*/\1/p')
-
-if [ -z "$AGENT" ] || [ -z "$TEAMS" ]; then
-  exit 0
-fi
+PAIR_AGENT_COUNT=$(printf '%s\n' "$PAIRS" | awk -F'\t' 'NF >= 2 && !seen[$2]++ { c++ } END { print c + 0 }')
 
 # Cooldown check. The marker is hook runtime state, not message storage, so it
 # lives in the skill's run dir — independent of AGMSG_STORAGE_PATH. Keeping it
 # out of the store means an overridden/sandboxed store still gets delivery even
 # when the default db dir doesn't exist.
-MARKER="$SKILL_DIR/run/.lastcheck-$AGENT"
+MARKER_HASH=$(printf '%s\t%s' "$PROJECT" "$TYPE" | cksum | awk '{print $1}')
+MARKER="$SKILL_DIR/run/.lastcheck-${TYPE}-${MARKER_HASH}"
 
 if [ -f "$MARKER" ]; then
   if [ "$(uname)" = "Darwin" ]; then
@@ -110,40 +100,40 @@ DB="$(agmsg_db_path)"
 if [ ! -f "$DB" ]; then exit 0; fi
 
 OUTPUT=""
-IFS=',' read -ra TEAM_LIST <<< "$TEAMS"
-for team in "${TEAM_LIST[@]}"; do
-  # Honor actas exclusivity locks. If (team, AGENT) is currently held by
-  # another live session, that session is the owner of that role's inbox —
-  # don't deliver here. Mirrors the per-pair filtering watch.sh does for
-  # CC sessions (#62), giving Stop-hook delivery (codex / claude-code
-  # turn-mode) the same "respect peer locks" guarantee.
-  #
-  # Note: AGENT comes from whoami.sh, which returns the first registered
-  # agent for (project, type). It is NOT the session's in-memory actas
-  # role. That asymmetry is the Codex caveat documented in README — if a
-  # Codex session actas'd into <name>, check-inbox is still polling
-  # whatever whoami chose first, not <name>.
-  state=$(actas_lock_state "$team" "$AGENT" "${SESSION_ID:-}")
+agmsg_check_sql_quote() {
+  printf '%s' "$1" | sed "s/'/''/g"
+}
+
+while IFS=$'\t' read -r team agent; do
+  [ -n "$team" ] || continue
+  [ -n "$agent" ] || continue
+  state=$(actas_lock_state "$team" "$agent" "${SESSION_ID:-}")
   case "$state" in
     other:*) continue ;;
   esac
 
+  team_sql=$(agmsg_check_sql_quote "$team")
+  agent_sql=$(agmsg_check_sql_quote "$agent")
   RESULT=$(agmsg_sqlite "$DB" "
     SELECT from_agent || char(31) || replace(replace(body, char(10), '\n'), char(9), '\t') || char(31) || created_at
-    FROM messages WHERE team='$team' AND to_agent='$AGENT' AND read_at IS NULL
+    FROM messages WHERE team='$team_sql' AND to_agent='$agent_sql' AND read_at IS NULL
     ORDER BY created_at ASC;
   ")
   if [ -n "$RESULT" ]; then
     COUNT=$(echo "$RESULT" | wc -l | tr -d ' ')
-    OUTPUT+="$COUNT new message(s) in $team:"$'\n'
+    if [ "$PAIR_AGENT_COUNT" -gt 1 ]; then
+      OUTPUT+="$COUNT new message(s) in $team (as $agent):"$'\n'
+    else
+      OUTPUT+="$COUNT new message(s) in $team:"$'\n'
+    fi
     while IFS=$'\x1f' read -r from body ts; do
       OUTPUT+="  [$ts] $from: $body"$'\n'
     done <<< "$RESULT"
     OUTPUT+=$'\n'
     # Mark as read
-    agmsg_sqlite "$DB" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE team='$team' AND to_agent='$AGENT' AND read_at IS NULL;" 2>/dev/null || true
+    agmsg_sqlite "$DB" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE team='$team_sql' AND to_agent='$agent_sql' AND read_at IS NULL;" 2>/dev/null || true
   fi
-done
+done <<< "$PAIRS"
 
 # No new messages
 if [ -z "$OUTPUT" ]; then

@@ -685,14 +685,36 @@ EOF
 
 @test "check-inbox (copilot): emits decision=block JSON when new messages arrive" {
   bash "$SCRIPTS/join.sh" testteam alice copilot "$TEST_PROJECT"
-  bash "$SCRIPTS/join.sh" testteam bob   copilot "$TEST_PROJECT"
   # Push cooldown window into the past so the first invocation is not skipped.
   bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
-  bash "$SCRIPTS/send.sh" testteam bob alice "ping copilot"
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" testteam bob alice "ping copilot"
   run bash -c "echo '{}' | bash '$SCRIPTS/check-inbox.sh' copilot '$TEST_PROJECT'"
   [ "$status" -eq 0 ]
   [[ "$output" =~ "\"decision\": \"block\"" ]]
+  [[ "$output" == *"1 new message(s) in testteam:"* ]]
+  [[ "$output" != *"(as alice)"* ]]
   [[ "$output" =~ "ping copilot" ]]
+}
+
+@test "check-inbox (copilot): checks each team-agent pair for multi-team identities" {
+  bash "$SCRIPTS/join.sh" team-a alice copilot "$TEST_PROJECT"
+  bash "$SCRIPTS/join.sh" team-b bob copilot "$TEST_PROJECT"
+  bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
+
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" team-a sender alice "ping alice"
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" team-b sender bob "ping bob"
+
+  run bash -c "echo '{}' | AGMSG_PANE_PUSH=0 bash '$SCRIPTS/check-inbox.sh' copilot '$TEST_PROJECT'"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "\"decision\": \"block\"" ]]
+  [[ "$output" == *"1 new message(s) in team-a (as alice):"* ]]
+  [[ "$output" == *"ping alice"* ]]
+  [[ "$output" == *"1 new message(s) in team-b (as bob):"* ]]
+  [[ "$output" == *"ping bob"* ]]
+
+  run bash -c "echo '{}' | AGMSG_PANE_PUSH=0 bash '$SCRIPTS/check-inbox.sh' copilot '$TEST_PROJECT'"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "agmsg: no new messages" ]]
 }
 
 
