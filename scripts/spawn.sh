@@ -8,9 +8,9 @@ set -euo pipefail
 #      actas flow just claims the role instead of prompting for a team),
 #   2. opens a place to run it — a tmux pane/window when run inside tmux,
 #      otherwise an OS terminal window,
-#   3. launches the agent CLI there with `/agmsg actas <name>` as its
-#      initial prompt, so the new agent comes up already registered and
-#      addressable.
+#   3. launches the agent CLI there with the agent-type's agmsg invocation
+#      prefix plus `agmsg actas <name>` as its initial prompt, so the new
+#      agent comes up already registered and addressable.
 #
 # Usage:
 #   spawn.sh <agent-type> <name> [options]
@@ -58,6 +58,8 @@ source "$SCRIPT_DIR/lib/actas-lock.sh"
 source "$SCRIPT_DIR/lib/type-registry.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/storage.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/pane.sh"
 
 die() { echo "spawn: $*" >&2; exit 1; }
 
@@ -246,16 +248,19 @@ AGMSG_RESOLVE_PROJECT=0 "$SCRIPT_DIR/join.sh" "$TEAM" "$NAME" "$AGENT_TYPE" "$PR
 # Automation (TCC) permission prompts users otherwise have to approve.
 #
 # The agent CLIs accept an initial prompt as a positional argument and submit
-# it as the session's first message; passing the slash command makes the new
-# agent run `/agmsg actas <name>` on boot. We cd into the project first so a
-# cross-project spawn lands in the right tree, and drop into an interactive
-# shell afterwards so the window/pane stays open with the agent's final output.
-# The slash command is named after the installed command, which the user may
-# have customized at install time (install.sh --cmd). Derive it from the skill
-# dir basename so a custom install (e.g. `/m`) spawns `/m actas <name>` rather
-# than a nonexistent `/agmsg actas <name>`.
+# it as the session's first message; passing the actas command makes the new
+# agent run the appropriate agmsg invocation on boot. We cd into the project
+# first so a cross-project spawn lands in the right tree, and drop into an
+# interactive shell afterwards so the window/pane stays open with the agent's
+# final output. The command is named after the installed command, which the
+# user may have customized at install time (install.sh --cmd). Derive it from
+# the skill dir basename so a custom install (e.g. `m`) spawns the target
+# type's prefix plus `m actas <name>` rather than a nonexistent hardcoded
+# command.
 CMD_NAME="$(basename "$SKILL_DIR")"
-ACTAS_PROMPT="/${CMD_NAME} actas ${NAME}"
+ACTAS_PREFIX="$(agmsg_type_get "$AGENT_TYPE" actas_prefix)"
+[ -n "$ACTAS_PREFIX" ] || ACTAS_PREFIX="/"
+ACTAS_PROMPT="${ACTAS_PREFIX}${CMD_NAME} actas ${NAME}"
 
 BOOT_DIR="${TMPDIR:-/tmp}/agmsg-spawn"
 mkdir -p "$BOOT_DIR" 2>/dev/null || true
@@ -267,6 +272,10 @@ mv "$BOOT" "$BOOT.command"   # .command so macOS `open` runs it in Terminal
 BOOT="$BOOT.command"
 {
   echo '#!/usr/bin/env bash'
+  # Preserve the spawner's PATH: GUI-launched backends (e.g. cmux.app) run this
+  # boot command with macOS's minimal PATH, which lacks asdf/homebrew/.local —
+  # so the CLI (and the codex shim's real-binary scan) wouldn't be found.
+  printf 'export PATH=%q\n' "$PATH"
   printf 'cd %q || exit 1\n' "$PROJECT"
   if [ -n "$SPAWN_AGENT" ]; then
     # Node-launcher path: pass the universal agmsg context + the actas prompt.
@@ -278,7 +287,7 @@ BOOT="$BOOT.command"
     printf '  --project %q \\\n' "$PROJECT"
     printf '  --initial-input %q\n' "$ACTAS_PROMPT"
   else
-    printf '%q %q\n' "$CLI_BIN" "$ACTAS_PROMPT"
+    printf '%q %q\n' "$CLI_PATH" "$ACTAS_PROMPT"
   fi
   echo 'rm -f "$0" 2>/dev/null'   # self-clean once the agent exits
   echo 'exec "${SHELL:-/bin/bash}" -i'
@@ -288,6 +297,16 @@ chmod +x "$BOOT"
 # ============================================================================
 # Placement — every launcher just runs $BOOT.
 # ============================================================================
+
+record_spawn_placement() {
+  local target_id="${1:?Usage: record_spawn_placement TARGET_ID}"
+  printf '%s\t%s\t%s\n' "$target_id" "$PROJECT" "$AGENT_TYPE" \
+    > "$(agmsg_spawn_path "$TEAM" "$NAME")" 2>/dev/null || true
+}
+
+cmux_ref_from_output() {
+  grep -Eo '(pane|surface):[^[:space:]]+' | tail -n 1
+}
 
 launch_in_tmux() {
   # $TMUX is set (we are inside a tmux pane), but the `tmux` client binary
@@ -316,8 +335,66 @@ launch_in_tmux() {
   # Record placement so `despawn --force` can tear this member down even if its
   # watcher later can't respond to ctrl:despawn. tmux ids are self-describing:
   # %N = pane (kill-pane), @N = window (kill-window). See #109.
-  printf '%s\t%s\t%s\n' "$target_id" "$PROJECT" "$AGENT_TYPE" \
-    > "$(agmsg_spawn_path "$TEAM" "$NAME")" 2>/dev/null || true
+  record_spawn_placement "tmux:$target_id"
+}
+
+launch_in_cmux() {
+  command -v cmux >/dev/null 2>&1 \
+    || die "cmux backend detected but the cmux binary is not on PATH"
+
+  local from direction split_ref surface_ref
+  from="$(agmsg_pane_self cmux 2>/dev/null)" \
+    || die "cmux backend detected but no current cmux surface could be identified"
+  direction="right"; [ "$SPLIT" = "v" ] && direction="down"
+
+  local -a workspace_args=()
+  if [ -n "${CMUX_WORKSPACE_ID:-}" ]; then
+    workspace_args=(--workspace "$CMUX_WORKSPACE_ID")
+  fi
+
+  split_ref="$(cmux --id-format refs new-split "$direction" --surface "$from" "${workspace_args[@]}" --focus false | tr -d '\r' | cmux_ref_from_output)" \
+    || die "cmux split failed"
+  [ -n "$split_ref" ] || die "cmux split did not return a pane or surface ref"
+
+  case "$split_ref" in
+    pane:*)
+      surface_ref="$(cmux --id-format refs new-surface --type terminal --pane "$split_ref" "${workspace_args[@]}" --working-directory "$PROJECT" --focus true | tr -d '\r' | cmux_ref_from_output)" \
+        || die "cmux terminal surface creation failed"
+      ;;
+    surface:*)
+      surface_ref="$split_ref"
+      ;;
+    *)
+      die "cmux split returned an unsupported ref: $split_ref"
+      ;;
+  esac
+  [ -n "$surface_ref" ] || die "cmux terminal surface creation did not return a surface ref"
+
+  cmux respawn-pane --surface "$surface_ref" "${workspace_args[@]}" --command "$BOOT" >/dev/null \
+    || die "cmux respawn-pane failed for $surface_ref"
+  record_spawn_placement "cmux:$surface_ref"
+}
+
+launch_in_wezterm() {
+  command -v wezterm >/dev/null 2>&1 \
+    || die "wezterm backend detected but the wezterm binary is not on PATH"
+
+  local from socket direction pane_id
+  from="$(agmsg_pane_self wezterm 2>/dev/null)" \
+    || die "wezterm backend detected but no current wezterm pane could be identified"
+  socket="$(agmsg_pane_socket wezterm)"
+  direction="--right"; [ "$SPLIT" = "v" ] && direction="--bottom"
+
+  if [ -n "$socket" ]; then
+    pane_id="$(WEZTERM_UNIX_SOCKET="$socket" wezterm cli split-pane --pane-id "$from" --cwd "$PROJECT" "$direction" "$BOOT" | tr -d '\r')" \
+      || die "wezterm split-pane failed"
+  else
+    pane_id="$(wezterm cli split-pane --pane-id "$from" --cwd "$PROJECT" "$direction" "$BOOT" | tr -d '\r')" \
+      || die "wezterm split-pane failed"
+  fi
+  pane_id="$(printf '%s\n' "$pane_id" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+  [ -n "$pane_id" ] || die "wezterm split-pane did not return a pane id"
+  record_spawn_placement "wezterm:$pane_id"
 }
 
 launch_macos_terminal() {
@@ -383,6 +460,21 @@ place_and_launch() {
     echo "spawned ${AGENT_TYPE} '${NAME}' via custom terminal template"
     return 0
   fi
+
+  local pane_backend
+  pane_backend="$(agmsg_pane_backend 2>/dev/null || printf 'none')"
+  case "$pane_backend" in
+    cmux)
+      launch_in_cmux
+      echo "spawned ${AGENT_TYPE} '${NAME}' in cmux split"
+      return 0
+      ;;
+    wezterm)
+      launch_in_wezterm
+      echo "spawned ${AGENT_TYPE} '${NAME}' in wezterm split"
+      return 0
+      ;;
+  esac
 
   case "$(uname -s)" in
     Darwin)
