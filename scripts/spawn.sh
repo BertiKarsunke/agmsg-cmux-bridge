@@ -308,6 +308,12 @@ cmux_ref_from_output() {
   grep -Eo '(pane|surface):[^[:space:]]+' | tail -n 1
 }
 
+cmux_uuid_from_output() {
+  # `cmux --id-format both` prints the UUID in parens after the ref, e.g.
+  #   OK surface:13 (6E68397E-DC97-4C93-894E-681D2E4308A7) workspace:2 (...)
+  grep -Eo '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' | head -n 1
+}
+
 launch_in_tmux() {
   # $TMUX is set (we are inside a tmux pane), but the `tmux` client binary
   # still has to be on PATH for split-window/new-window to work. In a
@@ -342,7 +348,7 @@ launch_in_cmux() {
   command -v cmux >/dev/null 2>&1 \
     || die "cmux backend detected but the cmux binary is not on PATH"
 
-  local from direction split_ref surface_ref
+  local from direction split_out split_ref surface_ref surface_uuid boot_cmd
   from="$(agmsg_pane_self cmux 2>/dev/null)" \
     || die "cmux backend detected but no current cmux surface could be identified"
   direction="right"; [ "$SPLIT" = "v" ] && direction="down"
@@ -352,17 +358,23 @@ launch_in_cmux() {
     workspace_args=(--workspace "$CMUX_WORKSPACE_ID")
   fi
 
-  split_ref="$(cmux --id-format refs new-split "$direction" --surface "$from" "${workspace_args[@]}" --focus false | tr -d '\r' | cmux_ref_from_output)" \
+  # `--id-format both` so we capture the surface UUID alongside the short ref.
+  split_out="$(cmux --id-format both new-split "$direction" --surface "$from" "${workspace_args[@]}" --focus false | tr -d '\r')" \
     || die "cmux split failed"
+  split_ref="$(printf '%s\n' "$split_out" | cmux_ref_from_output)"
   [ -n "$split_ref" ] || die "cmux split did not return a pane or surface ref"
 
   case "$split_ref" in
     pane:*)
-      surface_ref="$(cmux --id-format refs new-surface --type terminal --pane "$split_ref" "${workspace_args[@]}" --working-directory "$PROJECT" --focus true | tr -d '\r' | cmux_ref_from_output)" \
+      local surface_out
+      surface_out="$(cmux --id-format both new-surface --type terminal --pane "$split_ref" "${workspace_args[@]}" --working-directory "$PROJECT" --focus true | tr -d '\r')" \
         || die "cmux terminal surface creation failed"
+      surface_ref="$(printf '%s\n' "$surface_out" | cmux_ref_from_output)"
+      surface_uuid="$(printf '%s\n' "$surface_out" | cmux_uuid_from_output)"
       ;;
     surface:*)
       surface_ref="$split_ref"
+      surface_uuid="$(printf '%s\n' "$split_out" | cmux_uuid_from_output)"
       ;;
     *)
       die "cmux split returned an unsupported ref: $split_ref"
@@ -370,9 +382,25 @@ launch_in_cmux() {
   esac
   [ -n "$surface_ref" ] || die "cmux terminal surface creation did not return a surface ref"
 
-  cmux respawn-pane --surface "$surface_ref" "${workspace_args[@]}" --command "$BOOT" >/dev/null \
+  # Pin the worker's self-identity to the surface we just created. Exporting
+  # CMUX_SURFACE_ID alone is NOT enough: by the time the worker's `actas` runs,
+  # its ambient CMUX_SURFACE_ID has been re-injected by cmux to a focus/session
+  # dependent value (both workers end up reading the same one), so both
+  # self-register the same addr and pane-push nudges one pane
+  # (BUG-spawn-shared-pane-collision, and its recurrence). AGMSG_PANE_SELF is an
+  # agmsg-only override that agmsg_pane_self returns FIRST, before any cmux env
+  # lookup, and cmux never touches it — so it survives into the actas subprocess
+  # and is authoritative + unique per spawn. Keep CMUX_SURFACE_ID too so backend
+  # detection stays cmux.
+  boot_cmd="$BOOT"
+  if [ -n "${surface_uuid:-}" ]; then
+    boot_cmd="export AGMSG_PANE_SELF=$surface_uuid CMUX_SURFACE_ID=$surface_uuid; exec $BOOT"
+  fi
+
+  cmux respawn-pane --surface "$surface_ref" "${workspace_args[@]}" --command "$boot_cmd" >/dev/null \
     || die "cmux respawn-pane failed for $surface_ref"
-  record_spawn_placement "cmux:$surface_ref"
+  # Record placement by UUID (stable) when we have it; short refs can shift.
+  record_spawn_placement "cmux:${surface_uuid:-$surface_ref}"
 }
 
 launch_in_wezterm() {
