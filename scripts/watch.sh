@@ -212,6 +212,40 @@ agmsg_watch_register_panes() {
 
 agmsg_watch_register_panes || true
 
+agmsg_watch_self_close() {
+  local backend target socket
+  backend="$(agmsg_pane_backend 2>/dev/null || printf 'none')"
+  case "$backend" in
+    tmux)
+      target="$(agmsg_pane_self tmux 2>/dev/null || true)"
+      [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 1
+      tmux kill-pane -t "$target" 2>/dev/null
+      ;;
+    cmux)
+      target="$(agmsg_pane_self cmux 2>/dev/null || true)"
+      [ -n "$target" ] && command -v cmux >/dev/null 2>&1 || return 1
+      local -a workspace_args=()
+      if [ -n "${CMUX_WORKSPACE_ID:-}" ]; then
+        workspace_args=(--workspace "$CMUX_WORKSPACE_ID")
+      fi
+      cmux close-surface --surface "$target" "${workspace_args[@]}" >/dev/null 2>&1
+      ;;
+    wezterm)
+      target="$(agmsg_pane_self wezterm 2>/dev/null || true)"
+      [ -n "$target" ] && command -v wezterm >/dev/null 2>&1 || return 1
+      socket="$(agmsg_pane_socket wezterm)"
+      if [ -n "$socket" ]; then
+        WEZTERM_UNIX_SOCKET="$socket" wezterm cli kill-pane --pane-id "$target" >/dev/null 2>&1
+      else
+        wezterm cli kill-pane --pane-id "$target" >/dev/null 2>&1
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # Build the SQL WHERE clause. Each pair contributes:
 #   (team='<team>' AND to_agent='<agent>')
 # joined by OR. Single quotes inside team/agent names are doubled for SQL.
@@ -319,9 +353,7 @@ while true; do
             continue
           fi
           "$SCRIPT_DIR/reset.sh" "$PROJECT_PATH" "$AGENT_TYPE" "$to" "$SESSION_ID" >/dev/null 2>&1 || true
-          if [ -n "${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
-            tmux kill-pane -t "$TMUX_PANE" 2>/dev/null || true
-          else
+          if ! agmsg_watch_self_close; then
             echo "agmsg watch: despawned '$to' (role dropped); close this window manually" >&2
           fi
           exit 0
