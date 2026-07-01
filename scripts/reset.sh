@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: reset.sh <project_path> <type> [agent_id] [session_id]
+# Usage: reset.sh <project_path> <type> [agent_id|all] [session_id]
 #
 # Removes registrations for the given project/type across all teams.
 # If agent_id is omitted, it is resolved from whoami.sh for the current project/type.
+# Pass "all" as agent_id to remove every agent registered to this project/type.
 # If session_id is given, any actas exclusivity locks owned by that session_id
 # for the touched (team, agent_id) pairs are released too — this is how `drop`
 # returns the role to the pool so peer sessions can pick it up immediately
@@ -41,10 +42,32 @@ if [ -n "$SESSION_ID" ]; then
   SESSION_ID="$(agmsg_normalize_instance_id "$SESSION_ID" "$AGENT_TYPE")"
 fi
 
-if [ -z "$TARGET_AGENT" ]; then
+if [ ! -d "$TEAMS_DIR" ]; then
+  echo "No team registrations found."
+  exit 0
+fi
+
+# Build the list of agents to clear. "all" collects every agent id across all
+# team configs; the per-agent loop below filters by project/type, so agents not
+# registered to this project/type are harmless no-ops.
+TARGET_AGENTS=()
+if [ "$TARGET_AGENT" = "all" ]; then
+  while IFS= read -r a; do
+    [ -n "$a" ] && TARGET_AGENTS+=("$a")
+  done < <(for c in "$TEAMS_DIR"/*/config.json; do
+      [ -f "$c" ] || continue
+      esc=$(sed "s/'/''/g" "$c")
+      agmsg_sqlite_mem ".param set :json '$esc'" \
+        "SELECT key FROM json_each(json_extract(:json, '\$.agents'));"
+    done | sort -u)
+  if [ "${#TARGET_AGENTS[@]}" -eq 0 ]; then
+    echo "No registrations removed."
+    exit 0
+  fi
+elif [ -z "$TARGET_AGENT" ]; then
   WHOAMI=$(bash "$SCRIPT_DIR/whoami.sh" "$PROJECT_PATH" "$AGENT_TYPE")
   if echo "$WHOAMI" | grep -q '^agent='; then
-    TARGET_AGENT=$(echo "$WHOAMI" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')
+    TARGET_AGENTS=("$(echo "$WHOAMI" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')")
   elif echo "$WHOAMI" | grep -q '^multiple=true'; then
     echo "Multiple identities match this project/type. Pass an agent_id explicitly." >&2
     exit 1
@@ -52,11 +75,8 @@ if [ -z "$TARGET_AGENT" ]; then
     echo "No registered identity found for this project/type." >&2
     exit 1
   fi
-fi
-
-if [ ! -d "$TEAMS_DIR" ]; then
-  echo "No team registrations found."
-  exit 0
+else
+  TARGET_AGENTS=("$TARGET_AGENT")
 fi
 
 REMOVED=0
@@ -73,6 +93,7 @@ agmsg_reset_clear_pane() {
   agmsg_pane_registry_clear "$team" "$agent" 2>/dev/null || true
 }
 
+for TARGET_AGENT in "${TARGET_AGENTS[@]}"; do
 for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
   [ -f "$TEAM_CONFIG" ] || continue
   TEAM_DIR="$(dirname "$TEAM_CONFIG")"
@@ -160,6 +181,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
   if [ -n "$SESSION_ID" ]; then
     actas_lock_release "$TEAM_NAME" "$TARGET_AGENT" "$SESSION_ID" 2>/dev/null || true
   fi
+done
 done
 
 if [ "$REMOVED" -eq 0 ]; then

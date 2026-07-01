@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: leave.sh <team> <agent_id>
+# Usage: leave.sh <team> <agent_id|all>
 #
 # Removes an agent from a team. Removes the team if empty.
+# Pass "all" as agent_id to remove every agent (the team is then removed).
 
-TEAM="${1:?Usage: leave.sh <team> <agent_id>}"
+TEAM="${1:?Usage: leave.sh <team> <agent_id|all>}"
 AGENT_ID="${2:?Missing agent_id}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,6 +24,14 @@ TEAM_CONFIG="$TEAMS_DIR/$TEAM/config.json"
 if [ ! -f "$TEAM_CONFIG" ]; then
   echo "Team not found: $TEAM"
   exit 1
+fi
+
+# "all" — remove every agent; the team is then empty, so remove it outright.
+if [ "$AGENT_ID" = "all" ]; then
+  rm -f "$TEAM_CONFIG"
+  rmdir "$TEAMS_DIR/$TEAM" 2>/dev/null || true
+  echo "Left team $TEAM (all agents removed — team removed)"
+  exit 0
 fi
 
 CONFIG_ESCAPED=$(sed "s/'/''/g" "$TEAM_CONFIG")
