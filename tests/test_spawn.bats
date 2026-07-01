@@ -144,6 +144,7 @@ teardown() {
   boot="$(cat "$CAPTURE")"
   [ -f "$boot" ]
   run cat "$boot"
+  grep -F "/$cmd" "$boot" >/dev/null
   [[ "$output" == *"claude"* ]]
   [[ "$output" == *"/$cmd"* ]]
   [[ "$output" == *"actas"* ]]
@@ -164,6 +165,19 @@ teardown() {
   run cat "$boot"
   [[ "$output" == *"/m-$$"* ]]
   [[ "$output" != *"/agmsg actas"* ]]
+
+  : > "$CAPTURE"
+  bash "$custom/scripts/join.sh" myteam existing-codex codex "$PROJ"
+  run env AGMSG_TERMINAL="$STUB_BIN/record.sh {cmd}" \
+    bash "$custom/scripts/spawn.sh" codex bob --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  local dollar_custom
+  printf -v dollar_custom '\\$%s' "m-$$"
+  grep -F "$dollar_custom" "$boot" >/dev/null
+  ! grep -F "/m-$$" "$boot" >/dev/null
+  [[ "$output" == *"bob"* ]]
   rm -rf "$custom"
 }
 
@@ -198,6 +212,11 @@ teardown() {
   boot="$(cat "$CAPTURE")"
   [ -f "$boot" ]
   run cat "$boot"
+  local cmd dollar_prompt
+  cmd="$(basename "$TEST_SKILL_DIR")"
+  printf -v dollar_prompt '\\$%s' "$cmd"
+  grep -F "$dollar_prompt" "$boot" >/dev/null
+  ! grep -F "/$cmd" "$boot" >/dev/null
   [[ "$output" == *"codex"* ]]
   [[ "$output" == *"actas"* ]]
   [[ "$output" == *"reviewer"* ]]
