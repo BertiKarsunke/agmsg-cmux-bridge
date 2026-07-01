@@ -101,8 +101,32 @@ cmd_doctor_header() {
   echo "env hints: ${env_parts:-"(none)"}"
 }
 
+# Print "team/name" of OTHER registrations sharing the same backend+addr — a
+# pane-push collision (two agents nudged as one). See BUG-spawn-shared-pane-collision.
+cmd_doctor_addr_siblings() {
+  local self_team="$1" self_name="$2" backend="$3" addr="$4"
+  [ -n "$addr" ] || return 0
+  local skill_dir run_dir file base rest team name info b a
+  skill_dir="$(agmsg_pane_skill_dir)"
+  run_dir="$skill_dir/run"
+  [ -d "$run_dir" ] || return 0
+  for file in "$run_dir"/pane.*.*.json; do
+    [ -e "$file" ] || continue
+    base="$(basename "$file")"
+    rest="${base#pane.}"
+    rest="${rest%.json}"
+    team="${rest%%.*}"
+    name="${rest#*.}"
+    { [ "$team" = "$self_team" ] && [ "$name" = "$self_name" ]; } && continue
+    info="$(agmsg_pane_registry_read "$team" "$name" 2>/dev/null)" || continue
+    b="$(agmsg_pane_registry_field "$info" 1)"
+    a="$(agmsg_pane_registry_field "$info" 2)"
+    [ "$b" = "$backend" ] && [ "$a" = "$addr" ] && printf '%s/%s\n' "$team" "$name"
+  done
+}
+
 cmd_doctor_registry_one() {
-  local team="$1" name="$2" info backend addr project socket alive
+  local team="$1" name="$2" info backend addr project socket alive siblings
   if ! info="$(agmsg_pane_registry_read "$team" "$name" 2>/dev/null)"; then
     printf 'registry %s/%s: missing\n' "$team" "$name"
     DOCTOR_REGISTRY_STATE="missing"
@@ -125,11 +149,20 @@ cmd_doctor_registry_one() {
   printf 'registry %s/%s addr: %s\n' "$team" "$name" "$addr"
   printf 'registry %s/%s project: %s\n' "$team" "$name" "$project"
   printf 'registry %s/%s alive: %s\n' "$team" "$name" "$alive"
+
+  siblings="$(cmd_doctor_addr_siblings "$team" "$name" "$backend" "$addr")"
+  if [ -n "$siblings" ]; then
+    printf 'registry %s/%s COLLISION: shares %s addr %s with %s\n' \
+      "$team" "$name" "$backend" "$addr" "$(printf '%s' "$siblings" | paste -sd, -)"
+    DOCTOR_COLLISION="${DOCTOR_COLLISION:+$DOCTOR_COLLISION }$team/$name"
+  fi
+
   [ "$alive" = "alive" ]
 }
 
 cmd_doctor_registries() {
   DOCTOR_REGISTRY_STATE="ok"
+  DOCTOR_COLLISION=""
   if [ "$#" -eq 2 ]; then
     cmd_doctor_registry_one "$1" "$2" || true
     return
@@ -172,6 +205,8 @@ cmd_doctor() {
     echo "verdict: no tmux/cmux pane backend detected"
   elif [ "${DOCTOR_REGISTRY_STATE:-ok}" = "missing" ]; then
     echo "verdict: no pane registered"
+  elif [ -n "${DOCTOR_COLLISION:-}" ]; then
+    echo "verdict: collision (duplicate pane addr: ${DOCTOR_COLLISION})"
   elif [ "${DOCTOR_REGISTRY_STATE:-ok}" = "stale" ]; then
     echo "verdict: registered pane is stale (re-register needed)"
   else
