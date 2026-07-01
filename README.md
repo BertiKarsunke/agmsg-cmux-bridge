@@ -99,6 +99,8 @@ A project can belong to multiple teams; monitor and turn-mode delivery both proc
 | `AGMSG_ANNOUNCE_JOIN` | `1` | Set to `0` to disable join announcement notices. |
 | `AGMSG_PANE_PUSH` | `1` | Set to `0` to disable send-time pane injection while keeping normal SQLite messaging. |
 | `AGMSG_PANE_COMMIT_DELAY` | `0.4` | Delay, in seconds, between injected text and the two Enter key sends used to commit the prompt. |
+| `AGMSG_LEAVE_ON_EXIT` | `0` | Set to `1` to clear this project/type's registration when the session ends (SessionEnd hook). Off by default — registrations normally survive restarts so an agent rejoins as the same role. Only fires on a graceful exit (a hard kill/crash skips the hook); no-ops when the project/type has more than one identity. Export it in your shell profile so the hook process inherits it. |
+| `AGMSG_GC_ON_LIST` | `0` | Set to `1` to make `team.sh` also remove `[stale]` members (those whose pane marker proves their session died on this host) when it lists the team — the lazy backstop for the hard kills `AGMSG_LEAVE_ON_EXIT` can't catch. Off by default; `team.sh` otherwise only tags liveness, never mutates. Members with no marker (`[unknown]`, idle/persistent) or a pane on another host are never removed. |
 
 ## Credits and License
 
