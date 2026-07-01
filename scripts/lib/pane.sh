@@ -93,6 +93,15 @@ agmsg_pane_self() {
       printf '%s\n' "$TMUX_PANE"
       ;;
     cmux)
+      # Prefer the surface UUID: it is globally unique and stable, whereas cmux
+      # short refs (surface:N) are positional and can shift or collide across
+      # surfaces — which let two spawned workers register the same addr and made
+      # pane-push always nudge one pane (see BUG-spawn-shared-pane-collision).
+      # Fall back to identify's caller ref only when the env var is absent.
+      if [ -n "${CMUX_SURFACE_ID:-}" ]; then
+        printf '%s\n' "$CMUX_SURFACE_ID"
+        return 0
+      fi
       local json surface
       if json="$(cmux identify --json 2>/dev/null)"; then
         surface="$(agmsg_pane_json_extract "$json" '$.caller.surface_ref' 2>/dev/null || true)"
@@ -101,8 +110,7 @@ agmsg_pane_self() {
           return 0
         fi
       fi
-      [ -n "${CMUX_SURFACE_ID:-}" ] || return 1
-      printf '%s\n' "$CMUX_SURFACE_ID"
+      return 1
       ;;
     wezterm)
       [ -n "${WEZTERM_PANE:-}" ] || return 1
