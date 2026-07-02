@@ -2,7 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILL_DIR="${SKILL_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 source "$SCRIPT_DIR/lib/pane.sh"
+source "$SCRIPT_DIR/lib/type-registry.sh"
+source "$SCRIPT_DIR/lib/resolve-project.sh"
 
 usage() {
   cat <<'EOF'
@@ -10,8 +13,8 @@ Usage: pane.sh <command> [args...]
 
 Commands:
   register <team> <name> [type] [project]
-  status [<team> <name>]
-  doctor [<team> <name>]
+  status [--all|<team> <name>]
+  doctor [--all|<team> <name>]
   lookup <team> <name>
   test <team> <name>
   unregister <team> <name>
@@ -51,16 +54,7 @@ cmd_status_one() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$team" "$name" "$backend" "$addr" "$project" "$type"
 }
 
-cmd_status() {
-  if [ "$#" -eq 2 ]; then
-    cmd_status_one "$1" "$2"
-    return
-  fi
-  if [ "$#" -ne 0 ]; then
-    usage >&2
-    return 2
-  fi
-
+cmd_registry_pairs_all() {
   local skill_dir run_dir found file base rest team name
   skill_dir="$(agmsg_pane_skill_dir)"
   run_dir="$skill_dir/run"
@@ -74,12 +68,78 @@ cmd_status() {
       rest="${rest%.json}"
       team="${rest%%.*}"
       name="${rest#*.}"
-      cmd_status_one "$team" "$name" || true
+      printf '%s\t%s\n' "$team" "$name"
     done
   fi
+  [ "$found" -eq 1 ]
+}
+
+cmd_current_project_teams() {
+  local start="${1:-$(pwd)}" type project team name
+  while IFS= read -r type; do
+    [ -n "$type" ] || continue
+    project="$(agmsg_resolve_project "$start" "$type" 2>/dev/null || printf '%s' "$start")"
+    while IFS='	' read -r team name; do
+      [ -n "$team" ] || continue
+      printf '%s\n' "$team"
+    done < <("$SKILL_DIR/scripts/identities.sh" "$project" "$type")
+  done < <(agmsg_known_types | sort -u)
+}
+
+cmd_dedupe_lines() {
+  awk 'NF && !seen[$0]++'
+}
+
+cmd_team_in_scope() {
+  local team="$1" scoped_teams="$2"
+  printf '%s\n' "$scoped_teams" | grep -Fx -- "$team" >/dev/null
+}
+
+cmd_status_all() {
+  local found team name
+  found=0
+  while IFS='	' read -r team name; do
+    [ -n "$team" ] || continue
+    found=1
+    cmd_status_one "$team" "$name" || true
+  done < <(cmd_registry_pairs_all || true)
   if [ "$found" -eq 0 ]; then
     echo "No pane registrations."
   fi
+}
+
+cmd_status_scoped() {
+  local scoped_teams found team name
+  scoped_teams="$(cmd_current_project_teams "$(pwd)" | cmd_dedupe_lines)"
+  [ -n "$scoped_teams" ] || return 0
+
+  found=0
+  while IFS='	' read -r team name; do
+    [ -n "$team" ] || continue
+    cmd_team_in_scope "$team" "$scoped_teams" || continue
+    found=1
+    cmd_status_one "$team" "$name" || true
+  done < <(cmd_registry_pairs_all || true)
+  if [ "$found" -eq 0 ]; then
+    echo "No pane registrations."
+  fi
+}
+
+cmd_status() {
+  if [ "$#" -eq 1 ] && [ "$1" = "--all" ]; then
+    cmd_status_all
+    return
+  fi
+  if [ "$#" -eq 2 ]; then
+    cmd_status_one "$1" "$2"
+    return
+  fi
+  if [ "$#" -ne 0 ]; then
+    usage >&2
+    return 2
+  fi
+
+  cmd_status_scoped
 }
 
 cmd_doctor_header() {
@@ -105,6 +165,7 @@ cmd_doctor_header() {
 # pane-push collision (two agents nudged as one). See BUG-spawn-shared-pane-collision.
 cmd_doctor_addr_siblings() {
   local self_team="$1" self_name="$2" backend="$3" addr="$4"
+  local scoped_teams="${5:-}"
   [ -n "$addr" ] || return 0
   local skill_dir run_dir file base rest team name info b a
   skill_dir="$(agmsg_pane_skill_dir)"
@@ -118,6 +179,9 @@ cmd_doctor_addr_siblings() {
     team="${rest%%.*}"
     name="${rest#*.}"
     { [ "$team" = "$self_team" ] && [ "$name" = "$self_name" ]; } && continue
+    if [ -n "$scoped_teams" ]; then
+      cmd_team_in_scope "$team" "$scoped_teams" || continue
+    fi
     info="$(agmsg_pane_registry_read "$team" "$name" 2>/dev/null)" || continue
     b="$(agmsg_pane_registry_field "$info" 1)"
     a="$(agmsg_pane_registry_field "$info" 2)"
@@ -126,7 +190,8 @@ cmd_doctor_addr_siblings() {
 }
 
 cmd_doctor_registry_one() {
-  local team="$1" name="$2" info backend addr project socket alive siblings
+  local team="$1" name="$2" scoped_teams="${3:-}"
+  local info backend addr project socket alive siblings
   if ! info="$(agmsg_pane_registry_read "$team" "$name" 2>/dev/null)"; then
     printf 'registry %s/%s: missing\n' "$team" "$name"
     DOCTOR_REGISTRY_STATE="missing"
@@ -150,7 +215,7 @@ cmd_doctor_registry_one() {
   printf 'registry %s/%s project: %s\n' "$team" "$name" "$project"
   printf 'registry %s/%s alive: %s\n' "$team" "$name" "$alive"
 
-  siblings="$(cmd_doctor_addr_siblings "$team" "$name" "$backend" "$addr")"
+  siblings="$(cmd_doctor_addr_siblings "$team" "$name" "$backend" "$addr" "$scoped_teams")"
   if [ -n "$siblings" ]; then
     printf 'registry %s/%s COLLISION: shares %s addr %s with %s\n' \
       "$team" "$name" "$backend" "$addr" "$(printf '%s' "$siblings" | paste -sd, -)"
@@ -160,37 +225,65 @@ cmd_doctor_registry_one() {
   [ "$alive" = "alive" ]
 }
 
-cmd_doctor_registries() {
-  DOCTOR_REGISTRY_STATE="ok"
-  DOCTOR_COLLISION=""
-  if [ "$#" -eq 2 ]; then
-    cmd_doctor_registry_one "$1" "$2" || true
-    return
-  fi
-
-  local skill_dir run_dir found file base rest team name
-  skill_dir="$(agmsg_pane_skill_dir)"
-  run_dir="$skill_dir/run"
+cmd_doctor_registries_all() {
+  local found team name
   found=0
-  if [ -d "$run_dir" ]; then
-    for file in "$run_dir"/pane.*.*.json; do
-      [ -e "$file" ] || continue
-      found=1
-      base="$(basename "$file")"
-      rest="${base#pane.}"
-      rest="${rest%.json}"
-      team="${rest%%.*}"
-      name="${rest#*.}"
-      cmd_doctor_registry_one "$team" "$name" || true
-    done
-  fi
+  while IFS='	' read -r team name; do
+    [ -n "$team" ] || continue
+    found=1
+    cmd_doctor_registry_one "$team" "$name" || true
+  done < <(cmd_registry_pairs_all || true)
   if [ "$found" -eq 0 ]; then
     echo "registry: none"
     DOCTOR_REGISTRY_STATE="missing"
   fi
 }
 
+cmd_doctor_registries_scoped() {
+  local scoped_teams found team name
+  scoped_teams="$(cmd_current_project_teams "$(pwd)" | cmd_dedupe_lines)"
+  if [ -z "$scoped_teams" ]; then
+    echo "registry: none"
+    DOCTOR_REGISTRY_STATE="missing"
+    return
+  fi
+
+  found=0
+  while IFS='	' read -r team name; do
+    [ -n "$team" ] || continue
+    cmd_team_in_scope "$team" "$scoped_teams" || continue
+    found=1
+    cmd_doctor_registry_one "$team" "$name" "$scoped_teams" || true
+  done < <(cmd_registry_pairs_all || true)
+  if [ "$found" -eq 0 ]; then
+    echo "registry: none"
+    DOCTOR_REGISTRY_STATE="missing"
+  fi
+}
+
+cmd_doctor_registries() {
+  DOCTOR_REGISTRY_STATE="ok"
+  DOCTOR_COLLISION=""
+  if [ "$#" -eq 1 ] && [ "$1" = "--all" ]; then
+    cmd_doctor_registries_all
+    return
+  fi
+  if [ "$#" -eq 2 ]; then
+    cmd_doctor_registry_one "$1" "$2" || true
+    return
+  fi
+
+  cmd_doctor_registries_scoped
+}
+
 cmd_doctor() {
+  if [ "$#" -eq 1 ] && [ "$1" = "--all" ]; then
+    local scope_arg="--all"
+    set --
+  else
+    local scope_arg=""
+  fi
+
   if [ "$#" -ne 0 ] && [ "$#" -ne 2 ]; then
     usage >&2
     return 2
@@ -199,7 +292,11 @@ cmd_doctor() {
   local backend
   backend="$(agmsg_pane_backend 2>/dev/null || echo none)"
   cmd_doctor_header
-  cmd_doctor_registries "$@"
+  if [ -n "$scope_arg" ]; then
+    cmd_doctor_registries "$scope_arg"
+  else
+    cmd_doctor_registries "$@"
+  fi
 
   if [ "$backend" = "none" ]; then
     echo "verdict: no tmux/cmux pane backend detected"

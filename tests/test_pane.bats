@@ -63,6 +63,51 @@ _install_fake_wezterm() {
   [ "$output" = $'tmux\t%9\t/tmp/x\tcodex\t' ]
 }
 
+@test "pane: status defaults to current project teams and --all keeps global view" {
+  local project_a="$BATS_TEST_TMPDIR/project-a"
+  local project_b="$BATS_TEST_TMPDIR/project-b"
+  mkdir -p "$project_a" "$project_b"
+  AGMSG_ANNOUNCE_JOIN=0 bash "$SCRIPTS/join.sh" opus48 executor codex "$project_a" >/dev/null
+  AGMSG_ANNOUNCE_JOIN=0 bash "$SCRIPTS/join.sh" my1pick scout codex "$project_b" >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex "$project_a" >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%10 bash "$SCRIPTS/pane.sh" register my1pick scout codex "$project_b" >/dev/null
+
+  run env PROJECT="$project_a" SCRIPTS="$SCRIPTS" bash -c 'cd "$PROJECT" && bash "$SCRIPTS/pane.sh" status'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'opus48\texecutor'* ]]
+  [[ "$output" != *"my1pick"* ]]
+
+  run env PROJECT="$project_a" SCRIPTS="$SCRIPTS" bash -c 'cd "$PROJECT" && bash "$SCRIPTS/pane.sh" status --all'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'opus48\texecutor'* ]]
+  [[ "$output" == *$'my1pick\tscout'* ]]
+}
+
+@test "pane: doctor defaults to current project teams and --all keeps global collision checks" {
+  _install_fake_tmux
+  local project_a="$BATS_TEST_TMPDIR/project-a"
+  local project_b="$BATS_TEST_TMPDIR/project-b"
+  mkdir -p "$project_a" "$project_b"
+  AGMSG_ANNOUNCE_JOIN=0 bash "$SCRIPTS/join.sh" opus48 executor codex "$project_a" >/dev/null
+  AGMSG_ANNOUNCE_JOIN=0 bash "$SCRIPTS/join.sh" my1pick scout codex "$project_b" >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex "$project_a" >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register my1pick scout codex "$project_b" >/dev/null
+
+  run env PROJECT="$project_a" SCRIPTS="$SCRIPTS" AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 TMUX=tmux-session TMUX_PANE=%9 bash -c 'cd "$PROJECT" && bash "$SCRIPTS/pane.sh" doctor'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "registry opus48/executor: present" ]]
+  [[ "$output" != *"my1pick"* ]]
+  [[ "$output" != *"COLLISION"* ]]
+  [[ "$output" =~ "verdict: ok" ]]
+
+  run env PROJECT="$project_a" SCRIPTS="$SCRIPTS" AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 TMUX=tmux-session TMUX_PANE=%9 bash -c 'cd "$PROJECT" && bash "$SCRIPTS/pane.sh" doctor --all'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "registry opus48/executor: present" ]]
+  [[ "$output" =~ "registry my1pick/scout: present" ]]
+  [[ "$output" =~ "COLLISION" ]]
+  [[ "$output" =~ "verdict: collision (duplicate pane addr:" ]]
+}
+
 @test "pane: cli unregister clears registration" {
   AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x >/dev/null
 
@@ -116,7 +161,7 @@ _install_fake_wezterm() {
   AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 bash "$SCRIPTS/pane.sh" register my1pick scout codex /tmp/x >/dev/null
   AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 bash "$SCRIPTS/pane.sh" register my1pick executor codex /tmp/x >/dev/null
 
-  run env AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 CMUX_SURFACE_ID=surface:11 bash "$SCRIPTS/pane.sh" doctor
+  run env AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 CMUX_SURFACE_ID=surface:11 bash "$SCRIPTS/pane.sh" doctor --all
   [ "$status" -eq 0 ]
   [[ "$output" =~ "COLLISION" ]]
   [[ "$output" =~ "verdict: collision (duplicate pane addr:" ]]
