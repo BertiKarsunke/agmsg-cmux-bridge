@@ -89,7 +89,7 @@ agmsg_actas_refresh_panes() {
   local team
   while IFS= read -r team; do
     [ -z "$team" ] && continue
-    agmsg_pane_registry_write "$team" "$NAME" "$TYPE" "$PROJECT" 2>/dev/null || true
+    agmsg_pane_registry_write "$team" "$NAME" "$TYPE" "$PROJECT" "$SESSION_ID" 2>/dev/null || true
   done <<< "$TEAMS"
 }
 

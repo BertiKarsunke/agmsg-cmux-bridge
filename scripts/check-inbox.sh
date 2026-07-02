@@ -122,7 +122,7 @@ if [ "${AGMSG_PANE_PUSH:-1}" != "0" ] \
     case "$(actas_lock_state "$pane_team" "$pane_agent" "${SESSION_ID:-}")" in
       other:*) continue ;;
     esac
-    agmsg_pane_registry_write "$pane_team" "$pane_agent" "$TYPE" "$PROJECT" >/dev/null 2>&1 || true
+    agmsg_pane_registry_write "$pane_team" "$pane_agent" "$TYPE" "$PROJECT" "${SESSION_ID:-}" >/dev/null 2>&1 || true
   done <<< "$PAIRS"
 fi
 

@@ -8,26 +8,24 @@ set -euo pipefail
 # launches are routed through codex-monitor.sh. Everything else is passed
 # through to the real Codex command unchanged.
 
-if [ "${AGMSG_CODEX_SHIM_WRAPPER:-}" = "1" ] && [ -n "${AGMSG_CODEX_SHIM_SCRIPT_DIR:-}" ]; then
-  SCRIPT_DIR="$AGMSG_CODEX_SHIM_SCRIPT_DIR"
-else
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-fi
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CODEX_SHIM_TARGET="${AGMSG_CODEX_SHIM_TARGET:-}"
+CODEX_REAL_OVERRIDE="${AGMSG_REAL_CODEX:-}"
+unset AGMSG_CODEX_SHIM_WRAPPER AGMSG_CODEX_SHIM_SCRIPT_DIR AGMSG_CODEX_SHIM_TARGET AGMSG_REAL_CODEX
 
 is_agmsg_wrapper() {
   [ -f "$1" ] && grep -q "Optional Codex entrypoint shim for agmsg monitor mode" "$1" 2>/dev/null
 }
 
 resolve_real_codex() {
-  if [ -n "${AGMSG_REAL_CODEX:-}" ]; then
-    printf '%s\n' "$AGMSG_REAL_CODEX"
+  if [ -n "$CODEX_REAL_OVERRIDE" ]; then
+    printf '%s\n' "$CODEX_REAL_OVERRIDE"
     return 0
   fi
 
-  local self_dir self_path shim_target path_dir candidate candidate_dir candidate_path
+  local self_dir self_path path_dir candidate candidate_dir candidate_path
   self_dir="$(cd "$(dirname "$0")" && pwd)"
   self_path="$self_dir/$(basename "$0")"
-  shim_target="${AGMSG_CODEX_SHIM_TARGET:-}"
 
   local old_ifs="$IFS"
   IFS=:
@@ -40,7 +38,7 @@ resolve_real_codex() {
       [ -n "$candidate_dir" ] || continue
       candidate_path="$candidate_dir/$(basename "$candidate")"
       if [ "$candidate_path" != "$self_path" ] \
-        && [ "$candidate_path" != "$shim_target" ] \
+        && [ "$candidate_path" != "$CODEX_SHIM_TARGET" ] \
         && ! is_agmsg_wrapper "$candidate_path"; then
         printf '%s\n' "$candidate_path"
         return 0

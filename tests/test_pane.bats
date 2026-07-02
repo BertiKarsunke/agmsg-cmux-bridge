@@ -49,6 +49,26 @@ _install_fake_wezterm() {
   [ "$output" = $'tmux\t%9\t/tmp/x\tcodex\t' ]
 }
 
+@test "pane: registry_write stores owner and clear-if-owner guards newer registrations" {
+  run env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_write opus48 executor codex /tmp/x owner-a; agmsg_pane_registry_owner opus48 executor' _ "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  [ "$output" = "owner-a" ]
+
+  run bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_clear_if_owner opus48 executor owner-b || true; agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%9\t/tmp/x\tcodex\t' ]
+
+  run bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_clear_if_owner opus48 executor owner-a; agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
+  [ "$status" -ne 0 ]
+}
+
+@test "pane: clear-if-owner removes legacy ownerless registrations" {
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_write opus48 executor codex /tmp/x' _ "$SCRIPTS"
+
+  run bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_clear_if_owner opus48 executor owner-a; agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
+  [ "$status" -ne 0 ]
+}
+
 @test "pane: registry_write stores wezterm socket" {
   run env AGMSG_PANE_BACKEND=wezterm AGMSG_PANE_SELF=6 KAKU_UNIX_SOCKET=/tmp/kaku.sock bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_write opus48 executor codex /tmp/x; agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
   [ "$status" -eq 0 ]
@@ -116,6 +136,48 @@ _install_fake_wezterm() {
 
   run bash "$SCRIPTS/pane.sh" lookup opus48 executor
   [ "$status" -ne 0 ]
+}
+
+@test "pane: test reports responsive when ping is consumed" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
+
+  (
+    for _ in {1..30}; do
+      out="$(bash "$SCRIPTS/inbox.sh" opus48 executor --quiet 2>/dev/null || true)"
+      case "$out" in
+        *"ctrl:ping "*) exit 0 ;;
+      esac
+      sleep 0.1
+    done
+    exit 1
+  ) &
+  local consumer=$!
+
+  run env AGMSG_PANE_COMMIT_DELAY=0 bash "$SCRIPTS/pane.sh" test --timeout 5 opus48 executor
+  wait "$consumer" || true
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "status=responsive" ]]
+}
+
+@test "pane: test reports unresponsive without consuming ping" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
+
+  run env AGMSG_PANE_COMMIT_DELAY=0 bash "$SCRIPTS/pane.sh" test --timeout 0 opus48 executor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "status=unresponsive" ]]
+  [[ "$output" =~ "reason=ping-timeout" ]]
+}
+
+@test "pane: test reports unresponsive when registered pane is gone" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%10 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
+
+  run bash "$SCRIPTS/pane.sh" test --timeout 0 opus48 executor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "status=unresponsive" ]]
+  [[ "$output" =~ "reason=pane-not-alive" ]]
 }
 
 @test "pane: doctor exits zero and reports missing backend" {
@@ -192,6 +254,7 @@ _install_fake_wezterm() {
   [[ "$output" =~ "registry opus48/executor alive: alive" ]]
   [[ "$output" =~ "verdict: ok" ]]
 
-  run env AGMSG_PANE_COMMIT_DELAY=0 WEZTERM_EXPECT_SOCKET=/tmp/kaku.sock bash "$SCRIPTS/pane.sh" test opus48 executor
+  run env AGMSG_PANE_TEST_TIMEOUT=0 AGMSG_PANE_COMMIT_DELAY=0 WEZTERM_EXPECT_SOCKET=/tmp/kaku.sock bash "$SCRIPTS/pane.sh" test opus48 executor
   [ "$status" -eq 0 ]
+  [[ "$output" =~ "status=unresponsive" ]]
 }

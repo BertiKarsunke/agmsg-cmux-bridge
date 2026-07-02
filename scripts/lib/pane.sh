@@ -247,6 +247,7 @@ agmsg_pane_registry_json() {
   local type="$4"
   local registered_at="$5"
   local socket="$6"
+  local owner="${7:-}"
 
   if command -v sqlite3 >/dev/null 2>&1; then
     sqlite3 :memory: \
@@ -256,7 +257,8 @@ agmsg_pane_registry_json() {
       ".param set :type '$(agmsg_pane_sql_quote "$type")'" \
       ".param set :registered_at '$(agmsg_pane_sql_quote "$registered_at")'" \
       ".param set :socket '$(agmsg_pane_sql_quote "$socket")'" \
-      "SELECT json_object('backend', :backend, 'addr', :addr, 'project', :project, 'type', :type, 'registered_at', :registered_at, 'socket', :socket);" | tr -d '\r'
+      ".param set :owner '$(agmsg_pane_sql_quote "$owner")'" \
+      "SELECT json_object('backend', :backend, 'addr', :addr, 'project', :project, 'type', :type, 'registered_at', :registered_at, 'socket', :socket, 'owner', :owner);" | tr -d '\r'
     return 0
   fi
 
@@ -264,10 +266,11 @@ agmsg_pane_registry_json() {
 }
 
 agmsg_pane_registry_write() {
-  local team="${1:?Usage: agmsg_pane_registry_write TEAM NAME [TYPE] [PROJECT]}"
+  local team="${1:?Usage: agmsg_pane_registry_write TEAM NAME [TYPE] [PROJECT] [OWNER]}"
   local name="${2:?Missing agent name}"
   local type="${3:-}"
   local project="${4:-$(pwd)}"
+  local owner="${5:-${AGMSG_PANE_OWNER:-}}"
   local backend addr path registered_at json socket
 
   backend="$(agmsg_pane_backend)"
@@ -279,7 +282,7 @@ agmsg_pane_registry_write() {
 
   path="$(agmsg_pane_registry_path "$team" "$name")" || return 1
   registered_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  json="$(agmsg_pane_registry_json "$backend" "$addr" "$project" "$type" "$registered_at" "$socket")" || return 1
+  json="$(agmsg_pane_registry_json "$backend" "$addr" "$project" "$type" "$registered_at" "$socket" "$owner")" || return 1
 
   printf '%s\n' "$json" > "$path"
 }
@@ -324,6 +327,20 @@ agmsg_pane_registry_read() {
        COALESCE(json_extract(readfile('$sql_path'), '$.socket'), '');" | tr -d '\r'
 }
 
+agmsg_pane_registry_owner() {
+  local team="${1:?Usage: agmsg_pane_registry_owner TEAM NAME}"
+  local name="${2:?Missing agent name}"
+  local path sql_path
+
+  path="$(agmsg_pane_registry_path "$team" "$name")" || return 1
+  [ -f "$path" ] || return 1
+  command -v sqlite3 >/dev/null 2>&1 || return 1
+
+  sql_path="$(agmsg_pane_sql_readfile_path "$path")"
+  sqlite3 :memory: \
+    "SELECT COALESCE(json_extract(readfile('$sql_path'), '$.owner'), '');" | tr -d '\r'
+}
+
 agmsg_pane_registry_clear() {
   local team="${1:?Usage: agmsg_pane_registry_clear TEAM NAME}"
   local name="${2:?Missing agent name}"
@@ -331,4 +348,21 @@ agmsg_pane_registry_clear() {
 
   path="$(agmsg_pane_registry_path "$team" "$name")" || return 1
   rm -f "$path"
+}
+
+agmsg_pane_registry_clear_if_owner() {
+  local team="${1:?Usage: agmsg_pane_registry_clear_if_owner TEAM NAME OWNER}"
+  local name="${2:?Missing agent name}"
+  local owner="${3:-}"
+  local path stored_owner
+
+  path="$(agmsg_pane_registry_path "$team" "$name")" || return 1
+  [ -f "$path" ] || return 0
+
+  stored_owner="$(agmsg_pane_registry_owner "$team" "$name" 2>/dev/null || true)"
+  if [ -z "$stored_owner" ] || [ "$stored_owner" = "$owner" ]; then
+    rm -f "$path"
+    return 0
+  fi
+  return 1
 }

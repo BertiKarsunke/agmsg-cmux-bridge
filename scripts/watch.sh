@@ -117,14 +117,21 @@ mkdir -p "$RUN_DIR" 2>/dev/null || true
 if [ -f "$PIDFILE" ]; then
   prev_pid=$(cat "$PIDFILE" 2>/dev/null || true)
   if [ -n "$prev_pid" ] && [ "$prev_pid" != "$$" ] && kill -0 "$prev_pid" 2>/dev/null; then
+    killed_prev=0
     prev_cmd=$(compat_get_cmdline "$prev_pid" 2>/dev/null || true)
     if [ -n "$prev_cmd" ]; then
       case "$prev_cmd" in
-        *"$SKILL_DIR/scripts/watch.sh"*) kill "$prev_pid" 2>/dev/null || true ;;
+        *"$SKILL_DIR/scripts/watch.sh"*) kill "$prev_pid" 2>/dev/null && killed_prev=1 || true ;;
       esac
     else
       # ps unavailable (sandboxed) — skip cmdline validation, rely on kill -0
-      kill "$prev_pid" 2>/dev/null || true
+      kill "$prev_pid" 2>/dev/null && killed_prev=1 || true
+    fi
+    if [ "$killed_prev" -eq 1 ]; then
+      for _ in $(seq 1 10); do
+        kill -0 "$prev_pid" 2>/dev/null || break
+        sleep 0.1
+      done
     fi
   fi
 fi
@@ -237,7 +244,7 @@ agmsg_watch_register_panes() {
   local _team _agent
   while IFS=$'\t' read -r _team _agent; do
     [ -z "$_team" ] && continue
-    agmsg_pane_registry_write "$_team" "$_agent" "$AGENT_TYPE" "$PROJECT_PATH" >/dev/null 2>&1 || true
+    agmsg_pane_registry_write "$_team" "$_agent" "$AGENT_TYPE" "$PROJECT_PATH" "$SESSION_ID" >/dev/null 2>&1 || true
   done <<< "$PAIRS"
 }
 

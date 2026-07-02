@@ -89,6 +89,24 @@ teardown() {
   grep -qx 'plain-codex <resume>' "$CALL_LOG"
 }
 
+@test "codex-bridge-launcher: clears pane registration owned by exited parent" {
+  skip_on_windows "uses POSIX parent process liveness"
+
+  bash "$SCRIPTS/join.sh" team alice codex "$TEST_PROJECT" >/dev/null
+  sleep 2 &
+  local parent_pid=$!
+  local project_hash owner
+  project_hash="$(bash -c 'source "$1/lib/hash.sh"; printf "%s" "$2" | agmsg_sha1' _ "$SCRIPTS" "$TEST_PROJECT")"
+  owner="codex:$project_hash:$parent_pid"
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register team alice codex "$TEST_PROJECT" "$owner" >/dev/null
+
+  run env AGMSG_CODEX_BRIDGE_CMD=true bash "$TYPES/codex/codex-bridge-launcher.sh" codex "$TEST_PROJECT" ws://127.0.0.1:9 "$parent_pid"
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS/pane.sh" lookup team alice
+  [ "$status" -ne 0 ]
+}
+
 # --- reuse health check (B-lite) ---
 
 @test "codex-monitor: recreates a stale app-server left by a different codex version" {

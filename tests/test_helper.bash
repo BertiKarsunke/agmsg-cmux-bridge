@@ -2,6 +2,17 @@
 # Each test gets an isolated skill directory with its own DB and teams.
 
 setup_test_env() {
+  unset AGMSG_REAL_CODEX
+  unset AGMSG_CODEX_MONITOR_CMD
+  unset AGMSG_CODEX_BRIDGE
+  unset AGMSG_CODEX_BRIDGE_APP_SERVER
+  unset AGMSG_CODEX_BRIDGE_LAUNCHER
+  unset AGMSG_CODEX_BRIDGE_LAUNCHER_CMD
+  unset AGMSG_CODEX_SHIM_WRAPPER
+  unset AGMSG_CODEX_SHIM_SCRIPT_DIR
+  unset AGMSG_CODEX_SHIM_TARGET
+  unset AGMSG_PANE_OWNER
+
   export TEST_SKILL_DIR="$(mktemp -d)"
   mkdir -p "$TEST_SKILL_DIR"/{scripts,db,teams}
 

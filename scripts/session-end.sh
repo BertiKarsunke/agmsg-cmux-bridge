@@ -28,6 +28,10 @@ RUN_DIR="$SKILL_DIR/run"
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+if [ -f "$SCRIPT_DIR/lib/pane.sh" ]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/lib/pane.sh" || true
+fi
 
 # Drop project markers (#92) whose agent process has exited. Liveness-based, so
 # a session that persists across /clear keeps its marker until the process dies.
@@ -65,6 +69,19 @@ esac
 # artifacts); we deliberately do NOT glob-delete "<sid>.*", which would kill a
 # living sibling — those are left to session-start's liveness GC instead.
 INSTANCE_ID="$(agmsg_instance_id "$SESSION_ID" "$TYPE")"
+
+agmsg_session_end_clear_panes() {
+  declare -F agmsg_pane_registry_clear_if_owner >/dev/null 2>&1 || return 0
+
+  local team name
+  while IFS=$'\t' read -r team name; do
+    [ -n "$team" ] || continue
+    [ -n "$name" ] || continue
+    agmsg_pane_registry_clear_if_owner "$team" "$name" "$INSTANCE_ID" 2>/dev/null || true
+  done < <("$SCRIPT_DIR/identities.sh" "$PROJECT" "$TYPE" 2>/dev/null || true)
+}
+
+agmsg_session_end_clear_panes || true
 
 PIDFILE="$RUN_DIR/watch.$INSTANCE_ID.pid"
 if [ -f "$PIDFILE" ]; then

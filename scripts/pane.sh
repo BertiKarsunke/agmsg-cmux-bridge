@@ -6,29 +6,30 @@ SKILL_DIR="${SKILL_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 source "$SCRIPT_DIR/lib/pane.sh"
 source "$SCRIPT_DIR/lib/type-registry.sh"
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+source "$SCRIPT_DIR/lib/storage.sh"
 
 usage() {
   cat <<'EOF'
 Usage: pane.sh <command> [args...]
 
 Commands:
-  register <team> <name> [type] [project]
+  register <team> <name> [type] [project] [owner]
   status [--all|<team> <name>]
   doctor [--all|<team> <name>]
   lookup <team> <name>
-  test <team> <name>
+  test [--timeout <seconds>] <team> <name>
   unregister <team> <name>
 EOF
 }
 
 cmd_register() {
-  if [ "$#" -lt 2 ] || [ "$#" -gt 4 ]; then
+  if [ "$#" -lt 2 ] || [ "$#" -gt 5 ]; then
     usage >&2
     return 2
   fi
 
-  local team="$1" name="$2" type="${3:-}" project="${4:-$(pwd)}"
-  if ! agmsg_pane_registry_write "$team" "$name" "$type" "$project"; then
+  local team="$1" name="$2" type="${3:-}" project="${4:-$(pwd)}" owner="${5:-${AGMSG_PANE_OWNER:-}}"
+  if ! agmsg_pane_registry_write "$team" "$name" "$type" "$project" "$owner"; then
     echo "agmsg pane: no active tmux/cmux pane detected; registration not written" >&2
     return 1
   fi
@@ -320,12 +321,43 @@ cmd_lookup() {
 }
 
 cmd_test() {
+  local timeout="${AGMSG_PANE_TEST_TIMEOUT:-15}"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --timeout)
+        timeout="${2:?--timeout requires seconds}"
+        shift 2
+        ;;
+      --timeout=*)
+        timeout="${1#--timeout=}"
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        usage >&2
+        return 2
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
   if [ "$#" -ne 2 ]; then
     usage >&2
     return 2
   fi
+  case "$timeout" in
+    ''|*[!0-9]*)
+      echo "agmsg pane: --timeout must be a non-negative whole number" >&2
+      return 2
+      ;;
+  esac
 
-  local backend addr socket info
+  local team="$1" name="$2" backend addr socket info
   if ! info="$(agmsg_pane_registry_read "$1" "$2")"; then
     echo "agmsg pane: no pane registration for $1/$2" >&2
     return 1
@@ -334,10 +366,51 @@ cmd_test() {
   addr="$(agmsg_pane_registry_field "$info" 2)"
   socket="$(agmsg_pane_registry_field "$info" 5)"
   if ! agmsg_pane_alive "$backend" "$addr" "$socket"; then
-    echo "agmsg pane: registered pane is not alive: $backend $addr" >&2
+    printf 'status=unresponsive team=%s name=%s reason=pane-not-alive backend=%s addr=%s timeout=%s\n' \
+      "$team" "$name" "$backend" "$addr" "$timeout"
+    return 0
+  fi
+
+  local db token body id team_sql name_sql body_sql elapsed read_at
+  db="$(agmsg_db_path)"
+  [ -f "$db" ] || bash "$SCRIPT_DIR/internal/init-db.sh" >/dev/null
+  token="$(date +%s).$$.${RANDOM:-0}"
+  body="ctrl:ping $token"
+  team_sql="$(printf '%s' "$team" | sed "s/'/''/g")"
+  name_sql="$(printf '%s' "$name" | sed "s/'/''/g")"
+  body_sql="$(printf '%s' "$body" | sed "s/'/''/g")"
+  id="$(agmsg_sqlite "$db" "
+    INSERT INTO messages (team, from_agent, to_agent, body)
+    VALUES ('$team_sql', '__pane_test__', '$name_sql', '$body_sql');
+    SELECT last_insert_rowid();
+  " | tail -1 | tr -d '\r')"
+  case "$id" in
+    ''|*[!0-9]*)
+      echo "agmsg pane: failed to create ping message" >&2
+      return 1
+      ;;
+  esac
+
+  if ! agmsg_pane_inject "$backend" "$addr" "[agmsg-cmux] pane diagnostic ping for $team/$name. Run your agmsg skill to read the inbox; no reply needed." "$socket"; then
+    agmsg_sqlite "$db" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=$id;" >/dev/null 2>&1 || true
+    echo "agmsg pane: failed to nudge registered pane: $backend $addr" >&2
     return 1
   fi
-  agmsg_pane_inject "$backend" "$addr" "[agmsg-cmux] pane test ping" "$socket"
+
+  elapsed=0
+  while :; do
+    read_at="$(agmsg_sqlite "$db" "SELECT COALESCE(read_at, '') FROM messages WHERE id=$id;" 2>/dev/null | tr -d '\r' || true)"
+    if [ -n "$read_at" ]; then
+      printf 'status=responsive team=%s name=%s after=%ss message_id=%s\n' "$team" "$name" "$elapsed" "$id"
+      return 0
+    fi
+    [ "$elapsed" -ge "$timeout" ] && break
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  agmsg_sqlite "$db" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=$id AND read_at IS NULL;" >/dev/null 2>&1 || true
+  printf 'status=unresponsive team=%s name=%s reason=ping-timeout timeout=%ss message_id=%s\n' "$team" "$name" "$timeout" "$id"
 }
 
 cmd_unregister() {

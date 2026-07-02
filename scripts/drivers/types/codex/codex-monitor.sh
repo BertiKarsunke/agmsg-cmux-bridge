@@ -20,6 +20,7 @@ SOCKET_PATH=""
 CODEX_COMMAND="resume"
 CODEX_ARGS=()
 REAL_CODEX="${AGMSG_REAL_CODEX:-codex}"
+unset AGMSG_REAL_CODEX
 
 usage() {
   cat <<EOF
@@ -95,6 +96,7 @@ exec_plain_codex() {
 }
 
 PROJECT_HASH="$(printf '%s' "$PROJECT" | agmsg_sha1)"
+export AGMSG_PANE_OWNER="codex:$PROJECT_HASH:$$"
 SERVER_LOG="$RUN_DIR/codex-app-server.$PROJECT_HASH.log"
 SERVER_PID="$RUN_DIR/codex-app-server.$PROJECT_HASH.pid"
 PORT_FILE="$RUN_DIR/codex-app-server.$PROJECT_HASH.port"

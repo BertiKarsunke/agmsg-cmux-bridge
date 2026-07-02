@@ -22,9 +22,12 @@ RUN_DIR="$SKILL_DIR/run"
 source "$SCRIPT_DIR/../../../lib/hash.sh"
 PROJECT_HASH="$(printf '%s' "$PROJECT" | agmsg_sha1)"
 REQUEST_FILE="$RUN_DIR/codex-bridge-request.$PROJECT_HASH"
+PANE_OWNER="codex:$PROJECT_HASH:$PARENT_PID"
 
 # shellcheck source=../../../lib/node.sh
 source "$SCRIPT_DIR/../../../lib/node.sh"
+# shellcheck source=../../../lib/pane.sh
+source "$SCRIPT_DIR/../../../lib/pane.sh" 2>/dev/null || true
 NODE_BIN="$(agmsg_resolve_node)"
 TAB="$(printf '\t')"
 
@@ -52,6 +55,11 @@ EOF
   sleep 0.3
 done
 [ -n "$team" ] && [ -n "$name" ] || exit 0
+
+cleanup_pane_owner() {
+  declare -F agmsg_pane_registry_clear_if_owner >/dev/null 2>&1 || return 0
+  agmsg_pane_registry_clear_if_owner "$team" "$name" "$PANE_OWNER" 2>/dev/null || true
+}
 
 pidfile="$RUN_DIR/codex-bridge.$team.$name.pid"
 log="$RUN_DIR/codex-bridge.$team.$name.log"
@@ -119,3 +127,5 @@ EOF
   printf '%s' "$req_app_server" > "$appserver_file"
   sleep 1
 done
+
+cleanup_pane_owner || true

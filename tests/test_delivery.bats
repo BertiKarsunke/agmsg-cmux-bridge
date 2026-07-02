@@ -556,6 +556,26 @@ has_session_end() {
   echo '{}' | bash "$SCRIPTS/session-end.sh" claude-code "$TEST_PROJECT"
 }
 
+@test "session-end.sh clears pane registrations owned by the exiting session" {
+  bash "$SCRIPTS/join.sh" testteam alice claude-code "$TEST_PROJECT" >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register testteam alice claude-code "$TEST_PROJECT" sess-A >/dev/null
+
+  echo '{"session_id":"sess-A"}' | bash "$SCRIPTS/session-end.sh" claude-code "$TEST_PROJECT"
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam alice
+  [ "$status" -ne 0 ]
+}
+
+@test "session-end.sh does not clear pane registration refreshed by another session" {
+  bash "$SCRIPTS/join.sh" testteam alice claude-code "$TEST_PROJECT" >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register testteam alice claude-code "$TEST_PROJECT" sess-B >/dev/null
+
+  echo '{"session_id":"sess-A"}' | bash "$SCRIPTS/session-end.sh" claude-code "$TEST_PROJECT"
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam alice
+  [ "$status" -eq 0 ]
+}
+
 # --- CLAUDE_CODE_SESSION_ID baking ---
 
 @test "delivery set monitor: bakes CLAUDE_CODE_SESSION_ID into the directive" {
