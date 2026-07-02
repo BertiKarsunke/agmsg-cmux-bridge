@@ -61,6 +61,27 @@ teardown() {
   grep -q "backup sentinel" "$backup/SKILL.md"
 }
 
+@test "install: Claude Code command file gates actas/drop's fresh Monitor on delivery mode (#280)" {
+  # actas/drop used to invoke a fresh Monitor unconditionally, ignoring
+  # mode=off/turn (#280) — this is prompt-instruction text, not executable
+  # code, so a content assertion is the regression coverage available: both
+  # sections must carry the same delivery-mode gate the normal entry flow
+  # already has (line ~90 in the template). The Claude Code command file is
+  # only installed when ~/.claude exists (install.sh), separate from the
+  # shared codex-typed $SK/SKILL.md.
+  mkdir -p "$FAKE_HOME/.claude"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  local cmd_file="$FAKE_HOME/.claude/commands/agmsg.md"
+  [ -f "$cmd_file" ]
+  local actas_block drop_block
+  actas_block="$(sed -n '/If argument starts with "actas"/,/If argument starts with "drop"/p' "$cmd_file")"
+  drop_block="$(sed -n '/If argument starts with "drop"/,/If argument starts with "spawn"/p' "$cmd_file")"
+  [[ "$actas_block" == *"delivery mode is"*"monitor"*"both"* ]]
+  [[ "$actas_block" == *"delivery.sh status"* ]]
+  [[ "$drop_block" == *"delivery mode is"*"monitor"*"both"* ]]
+  [[ "$drop_block" == *"delivery.sh status"* ]]
+}
+
 @test "install: --update warns to re-register delivery hooks (#133)" {
   HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
   run env HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg --update
@@ -481,6 +502,16 @@ PY
   grep -q "~/.agents/skills/agmsg/scripts" "$hermes_skill"
 }
 
+@test "install: Hermes skill no longer advertises 'spawn hermes' as a valid example (#279)" {
+  mkdir -p "$FAKE_HOME/.hermes"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  local hermes_skill="$FAKE_HOME/.hermes/skills/agmsg/SKILL.md"
+  [ -f "$hermes_skill" ]
+  ! grep -q "spawn hermes reviewer" "$hermes_skill"
+  ! grep -q 'must be `claude-code`, `codex`, or `hermes`' "$hermes_skill"
+  grep -q "hermes.*is not spawnable\|hermes.*not spawnable" "$hermes_skill"
+}
+
 @test "install: custom command name is substituted in Hermes skill" {
   mkdir -p "$FAKE_HOME/.hermes"
   HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd msg
@@ -557,4 +588,37 @@ PY
   HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --update
   # The refresh is gated on an existing agmsg shim — it must not opt the user in.
   [ ! -e "$FAKE_HOME/.agents/bin/codex" ]
+}
+
+# --- grok-build skill (~/.grok/skills/<name>/SKILL.md) ---
+
+@test "install: drops a Grok Build SKILL.md when ~/.grok exists" {
+  mkdir -p "$FAKE_HOME/.grok"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  local grok_skill="$FAKE_HOME/.grok/skills/agmsg/SKILL.md"
+  [ -f "$grok_skill" ]
+  grep -q "whoami.sh \"\$(pwd)\" grok-build" "$grok_skill"
+  ! grep -q "whoami.sh \"\$(pwd)\" codex" "$grok_skill"
+  grep -q "^name: agmsg" "$grok_skill"
+}
+
+@test "install: skips Grok Build skill when ~/.grok is absent" {
+  rm -rf "$FAKE_HOME/.grok"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  [ ! -d "$FAKE_HOME/.grok" ]
+}
+
+@test "install --update: installs Grok Build skill for upgraders without prior skill" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  [ ! -d "$FAKE_HOME/.grok/skills/agmsg" ]
+  mkdir -p "$FAKE_HOME/.grok"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --update
+  [ -f "$FAKE_HOME/.grok/skills/agmsg/SKILL.md" ]
+  grep -q "whoami.sh \"\$(pwd)\" grok-build" "$FAKE_HOME/.grok/skills/agmsg/SKILL.md"
+}
+
+@test "install: --agent-type grok-build makes shared SKILL.md Grok-typed" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg --agent-type grok-build
+  grep -q "whoami.sh \"\$(pwd)\" grok-build" "$SK/SKILL.md"
+  ! grep -q "whoami.sh \"\$(pwd)\" codex" "$SK/SKILL.md"
 }

@@ -8,14 +8,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Join announcements: when a new member or role joins (a fresh join, or an `actas` that creates a new role; both route through `join.sh`), the team leader (`AGMSG_TEAM_LEADER`, default `planner`) gets a `[JOIN]` inbox notice. Disable with `AGMSG_ANNOUNCE_JOIN=0`.
+- Upstream agmsg v1.1.1-v1.1.3 changes are merged into this fork, including `spawn --boot-prompt`, `spawn --model`, spawn-options YAML, the grok-build agent type, the Astro/Tailwind site, logo assets, monitor robustness fixes, Windows/MSYS2 compatibility fixes, registry locking, and SQL/path escaping fixes.
 
 ### Fixed
 - Multi-team turn-mode delivery: `check-inbox.sh` now polls every `(team, agent)` pair for the project (via `identities.sh`, the same source `watch.sh` uses) instead of one agent name across all teams. An agent joined under different names per team no longer misses messages; the header shows `(as <agent>)` when a project has more than one identity.
+- Preserved the fork's pane-push contracts while merging upstream: `spawn.sh` still supports cmux/wezterm placement and `backend:id` spawn records, `watch.sh` still self-registers panes, and `send.sh` still treats pane push as best-effort on top of inbox delivery.
 
 ## [1.2.0] - 2026-06-25
 
 ### Fixed
 - Turn-mode agents (codex, gemini, copilot, cursor, opencode, antigravity, hermes) now re-register their current pane on `actas`, so pane-push reaches the live pane even when the role moved panes or sessions. Previously, only a brand-new join registered the pane; an existing role's `actas` left a stale registration and sends printed "pane not alive, skipped". Claude Code already refreshes this path through `actas-claim.sh`.
+
+## [1.1.3] - 2026-06-30
+
+### Added
+- Use brand logo mark + favicon set (#257)
+- Redesign agmsg.cc landing with Astro + Tailwind (#213) (#249)
+- Allow passing an initial prompt to the spawned agent (#212)
+
+### Fixed
+- Run watch-once.sh via bash so the codex bridge arms on Windows
+- Prefer shell function monitor shim; skip agmsg wrapper when resolving real codex (#193)
+- Drop monitor/both — Gemini has no Monitor tool (#258)
+- Skip Monitor directive when watcher already alive (#246)
+- Escape interpolated values as SQL string literals (#223)
+- Add CIM fallback for /proc-less cmdline/comm (#225) (#234)
+- Robust monitor — session-bind, orphan reaper, foolproof launch (#245)
+- Report bridge liveness in delivery status (#232)
+- Reject agent names that break JSON paths
+- Pipe SQL via stdin to avoid ARG_MAX on large bodies
+
+### Documentation
+- Add agmsg logo asset kit (#255)
+
+## [1.1.2] - 2026-06-27
+
+### Added
+- Add opt-in explicit-launch monitor delivery (#236)
+- Add MSYS2 compat shim (#88) (#211)
+
+### Fixed
+- Start the watcher when GROK_SESSION_ID is empty (#236 follow-up) (#238)
+- Keep Codex working across 0.142 upgrades (fail-open + stale app-server reuse) (#237)
+- Serialize team config writes behind a per-team lock (#141) (#227)
+- Open the message DB via a Windows-acceptable path (#197) (#226)
+- Handle whoami suggest= identity and anchor agent= match (#224)
+- Bound bridge app-server stalls (#209)
+
+## [1.1.1] - 2026-06-25
+
+### Added
+- Add --model to launch a spawned agent on a chosen model (#220)
+- Add grok-build agent type (xAI Grok Build CLI) (#216)
+
+### Fixed
+- Scope watcher teardown to (project, type), not project (#219)
+- Exit on originating-session death so a quiet watcher can't hang (#67, #388) (#215)
+- Quote Monitor command args so space-in-path survives (#188) (#200)
+- Use tasklist for native pid liveness in agmsg_instance_alive (#134)
 
 ## [1.1.0] - 2026-06-22
 
@@ -138,6 +188,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [1.3.0]: https://github.com/fujibee/agmsg/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/fujibee/agmsg/compare/v1.1.0...v1.2.0
+[1.1.3]: https://github.com/fujibee/agmsg/compare/v1.1.2...v1.1.3
+[1.1.2]: https://github.com/fujibee/agmsg/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/fujibee/agmsg/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/fujibee/agmsg/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/fujibee/agmsg/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/fujibee/agmsg/compare/v1.0.4...v1.0.5

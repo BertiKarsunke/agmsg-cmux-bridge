@@ -10,7 +10,7 @@ setup() {
   # a terminal. PATH is prepended so the stubs win.
   export STUB_BIN="$TEST_SKILL_DIR/stub-bin"
   mkdir -p "$STUB_BIN"
-  for bin in claude codex; do
+  for bin in claude codex grok hermes cursor-agent gemini agy copilot opencode; do
     printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/$bin"
     chmod +x "$STUB_BIN/$bin"
   done
@@ -37,14 +37,14 @@ teardown() {
 
 # --- argument validation ---
 
-@test "spawn: rejects unsupported agent type (gemini)" {
-  run bash "$SCRIPTS/spawn.sh" gemini foo --project "$PROJ"
-  [ "$status" -ne 0 ]
-  [[ "$output" =~ "not supported by spawn yet" ]]
-}
-
-@test "spawn: rejects unsupported agent type (opencode)" {
-  run bash "$SCRIPTS/spawn.sh" opencode foo --project "$PROJ"
+@test "spawn: rejects a known type with neither cli= nor spawn= (#277)" {
+  # All nine built-ins are spawnable now, so the 'not supported by spawn yet'
+  # gate (a known type missing both cli= and spawn=) needs a fixture — no
+  # real built-in demonstrates it any more.
+  local nd="$TEST_SKILL_DIR/scripts/drivers/types/noclitype"
+  mkdir -p "$nd"
+  printf 'name=noclitype\ntemplate=template.md\n' > "$nd/type.conf"
+  run bash "$SCRIPTS/spawn.sh" noclitype foo --project "$PROJ"
   [ "$status" -ne 0 ]
   [[ "$output" =~ "not supported by spawn yet" ]]
 }
@@ -81,6 +81,16 @@ teardown() {
   run env PATH="$STUB_BIN:/usr/bin:/bin" bash "$SCRIPTS/spawn.sh" codex foo --project "$PROJ"
   [ "$status" -ne 0 ]
   [[ "$output" =~ "not found on PATH" ]]
+}
+
+@test "spawn: a multi-word cli= (opencode) checks only its first word's existence (#277)" {
+  rm -f "$STUB_BIN/opencode"
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run env PATH="$STUB_BIN:/usr/bin:/bin" bash "$SCRIPTS/spawn.sh" opencode foo --project "$PROJ"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "'opencode' not found on PATH" ]]
+  # never searches for the literal multi-word string as one executable name
+  [[ "$output" != *"'opencode run --interactive' not found"* ]]
 }
 
 # --- team resolution ---
@@ -151,6 +161,231 @@ teardown() {
   [[ "$output" == *"$PROJ"* ]]
 }
 
+@test "spawn: grok-build launches the plain grok CLI with the actas prompt" {
+  # grok-build is spawnable and monitor=no, so spawn skips the readiness wait.
+  # Delivery is a rule file (no hook), so no folder-trust flag is needed —
+  # the launch is the bare `grok "/<cmd> actas <name>"`, like claude-code.
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" grok-build alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  [ -f "$boot" ]
+  run cat "$boot"
+  [[ "$output" == *"grok"* ]]
+  [[ "$output" == *"actas"* ]]
+  [[ "$output" == *"alice"* ]]
+  [[ "$output" != *"--trust"* ]]
+}
+
+# --- --model (#135): per-type model flag, pass-through id ---
+
+@test "spawn --model: claude-code launch includes its --model flag + id" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --model claude-opus-4-8 --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"claude --model claude-opus-4-8"* ]]
+  [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn --model: codex launch uses its -m model flag" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" codex alice --project "$PROJ" --model gpt-5 --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"codex -m gpt-5"* ]]
+}
+
+@test "spawn --model: grok-build launch uses its --model flag" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" grok-build alice --project "$PROJ" --model grok-build --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"grok --model grok-build"* ]]
+}
+
+@test "spawn --model: refused for a type with no model_arg in its manifest" {
+  # No real built-in is spawnable without a model_arg (#279 dropped hermes'
+  # spawnable=yes, its only remaining example) — fixture a minimal one,
+  # reusing the already-stubbed `claude` binary as its cli=.
+  local nd="$TEST_SKILL_DIR/scripts/drivers/types/nomodeltype"
+  mkdir -p "$nd"
+  printf 'name=nomodeltype\ntemplate=template.md\ncli=claude\nspawnable=yes\n' > "$nd/type.conf"
+  run bash "$SCRIPTS/spawn.sh" nomodeltype foo --project "$PROJ" --model whatever --no-wait
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "does not support --model" ]]
+}
+
+@test "spawn: no --model leaves the launch flag-free" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" != *"--model"* ]]
+}
+
+# --- newly spawnable types (#277): cursor, gemini, antigravity, copilot, opencode ---
+
+@test "spawn: cursor launches cursor-agent with a bare positional prompt" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" cursor alice --project "$PROJ" --model sonnet-4-thinking --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"cursor-agent --model sonnet-4-thinking"* ]]
+  [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn: gemini launches gemini with a bare positional prompt" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" gemini alice --project "$PROJ" --model gemini-3-pro --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"gemini --model gemini-3-pro"* ]]
+  [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn: antigravity launches agy with --prompt-interactive (not a bare positional)" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" antigravity alice --project "$PROJ" --model gemini-3-pro --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"agy --model gemini-3-pro --prompt-interactive"* ]]
+  [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn: copilot launches copilot with --interactive (not a bare positional)" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" copilot alice --project "$PROJ" --model gpt-5.4 --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"copilot --model gpt-5.4 --interactive"* ]]
+  [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn: opencode launches its 'run --interactive' fixed subcommand prefix" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" opencode alice --project "$PROJ" --model anthropic/claude-opus-4-8 --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"opencode run --interactive --model anthropic/claude-opus-4-8"* ]]
+  [[ "$output" == *"actas"* ]]
+  # no bare 'opencode' invocation without the fixed prefix
+  [[ "$output" != *$'\n''opencode --model'* ]]
+}
+
+@test "spawn: prompt_arg lands after spawn-options, immediately before the prompt" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  local opts="$TEST_SKILL_DIR/spawn_options.yaml"
+  cat > "$opts" <<'YAML'
+antigravity:
+  --sandbox: true
+YAML
+  run env AGMSG_SPAWN_OPTIONS_FILE="$opts" \
+    bash "$SCRIPTS/spawn.sh" antigravity alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"agy --sandbox --prompt-interactive"* ]]
+}
+
+# --- spawn options (#273): per-type extra CLI args from a YAML file ---
+
+@test "spawn: injects spawn-options flags from AGMSG_SPAWN_OPTIONS_FILE" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  local opts="$TEST_SKILL_DIR/spawn_options.yaml"
+  cat > "$opts" <<'YAML'
+claude-code:
+  --permission-mode: acceptEdits
+  --dangerously-skip-permissions: true
+YAML
+  run env AGMSG_SPAWN_OPTIONS_FILE="$opts" \
+    bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"claude --permission-mode acceptEdits --dangerously-skip-permissions"* ]]
+  [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn: spawn-options flags land after --model, before the actas prompt" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  local opts="$TEST_SKILL_DIR/spawn_options.yaml"
+  cat > "$opts" <<'YAML'
+claude-code:
+  --permission-mode: acceptEdits
+YAML
+  run env AGMSG_SPAWN_OPTIONS_FILE="$opts" \
+    bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --model claude-opus-4-8 --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"claude --model claude-opus-4-8 --permission-mode acceptEdits"* ]]
+}
+
+@test "spawn: a false spawn-options value suppresses that flag" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  local opts="$TEST_SKILL_DIR/spawn_options.yaml"
+  cat > "$opts" <<'YAML'
+claude-code:
+  --dangerously-skip-permissions: false
+YAML
+  run env AGMSG_SPAWN_OPTIONS_FILE="$opts" \
+    bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" != *"--dangerously-skip-permissions"* ]]
+}
+
+@test "spawn: only the spawned type's section applies, not another type's" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  local opts="$TEST_SKILL_DIR/spawn_options.yaml"
+  cat > "$opts" <<'YAML'
+codex:
+  --sandbox: workspace-write
+YAML
+  run env AGMSG_SPAWN_OPTIONS_FILE="$opts" \
+    bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" != *"--sandbox"* ]]
+}
+
+@test "spawn: no spawn-options file leaves the launch unchanged" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run env AGMSG_SPAWN_OPTIONS_FILE="$TEST_SKILL_DIR/no-such-file.yaml" \
+    bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"claude"*"actas"* ]]
+}
+
+@test "spawn: falls back to ~/.agmsg/config/spawn_options.yaml when the env var is unset" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  mkdir -p "$HOME/.agmsg/config"
+  cat > "$HOME/.agmsg/config/spawn_options.yaml" <<'YAML'
+claude-code:
+  --permission-mode: acceptEdits
+YAML
+  unset AGMSG_SPAWN_OPTIONS_FILE
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"--permission-mode acceptEdits"* ]]
+}
+
 @test "spawn: actas prompt uses the install command name (not hardcoded agmsg)" {
   # Rename the skill dir to a custom command name and re-point SCRIPTS so the
   # script resolves SKILL_DIR basename = the custom name.
@@ -165,6 +400,38 @@ teardown() {
   [[ "$output" == *"/m-$$"* ]]
   [[ "$output" != *"/agmsg actas"* ]]
   rm -rf "$custom"
+}
+
+@test "spawn: --boot-prompt appends an initial task to the actas prompt" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait \
+    --boot-prompt "review the diff"
+  [ "$status" -eq 0 ]
+
+  # The boot script still carries the actas slash command, and now ALSO the
+  # task text, so the spawned agent claims its identity AND acts on the task in
+  # its first turn. (printf %q escapes spaces, so assert on tokens.)
+  boot="$(cat "$CAPTURE")"
+  [ -f "$boot" ]
+  run cat "$boot"
+  [[ "$output" == *"actas"* ]]
+  [[ "$output" == *"alice"* ]]
+  [[ "$output" == *"review"* ]]
+  [[ "$output" == *"diff"* ]]
+}
+
+@test "spawn: without --boot-prompt the boot script carries no extra task text" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+
+  # Guards the byte-identical claim: with no --boot-prompt, only the actas command
+  # is passed — no task text leaks into the boot script.
+  boot="$(cat "$CAPTURE")"
+  [ -f "$boot" ]
+  run cat "$boot"
+  [[ "$output" == *"actas"* ]]
+  [[ "$output" != *"review the diff"* ]]
 }
 
 @test "spawn: errors when \$TMUX is set but tmux is not on PATH" {
@@ -250,4 +517,60 @@ teardown() {
   run bash "$SCRIPTS/spawn.sh" codex reviewer --project "$PROJ"
   [ "$status" -eq 0 ]
   [[ "$output" == *"skipping readiness wait"* ]]
+}
+
+@test "spawn: grok-build skips the readiness wait even without --no-wait (monitor=no)" {
+  # Regression guard: grok-build's monitor watcher attaches via the agent's
+  # actas/rule launch (no SessionStart hook) and only in monitor mode, so there
+  # is no ready sentinel for spawn to await. With monitor=no, spawn must skip the
+  # wait and return immediately instead of hanging a default turn/off-mode spawn
+  # until --ready-timeout. (Without this, monitor=yes made the wait fire.)
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  run env -u TMUX bash "$SCRIPTS/spawn.sh" grok-build alice --project "$PROJ" \
+    --terminal "true # {cmd}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping readiness wait"* ]]
+  [[ "$output" != *"status=timeout"* ]]
+  [[ "$output" != *"status=ready"* ]]
+}
+
+# --- initial prompt (--boot-prompt) ---
+# spawn folds an optional initial task into the agent's first prompt: the boot
+# prompt becomes the actas slash command followed (newline-separated) by the
+# task, so the new agent claims its identity AND starts the task in one turn —
+# the only way to hand a one-shot goal to a no-Monitor peer (codex). These tests
+# assert on the generated boot script the terminal template is handed (captured
+# via record.sh), the same way the actas-prompt tests above do.
+
+@test "spawn: --boot-prompt requires a task (missing arg errors)" {
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --boot-prompt
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--boot-prompt needs a task"* ]]
+}
+
+@test "spawn: --boot-prompt \"\" is treated as no task (no-op, not an error)" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  # An explicit empty string must NOT abort the spawn — it degrades to a plain
+  # spawn (so a scripted `--boot-prompt "$VAR"` with an empty VAR still works).
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait --boot-prompt ""
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  run cat "$boot"
+  [[ "$output" == *"actas"* ]]
+  [[ "$output" == *"alice"* ]]
+  # No task appended → no newline-join → boot prompt unchanged.
+  [[ "$output" != *'\n'* ]]
+}
+
+@test "spawn: --boot-prompt folds the initial task into the boot prompt (codex)" {
+  bash "$SCRIPTS/join.sh" myteam existing codex "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" codex reviewer --project "$PROJ" \
+    --boot-prompt "REVIEW_THE_DIFF"
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"
+  [ -f "$boot" ]
+  run cat "$boot"
+  [[ "$output" == *"actas"* ]]
+  [[ "$output" == *"reviewer"* ]]
+  [[ "$output" == *"REVIEW_THE_DIFF"* ]]
 }

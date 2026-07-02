@@ -14,12 +14,20 @@ set -euo pipefail
 #
 # Usage:
 #   spawn.sh <agent-type> <name> [options]
+#   spawn.sh <agent-type> <name> --boot-prompt "<initial task>" [options]
 #
 #   <agent-type>   any registered type whose manifest is spawnable: a `cli=`
 #                  binary (direct-CLI launch) or a `spawn=` node launcher
 #   <name>         actas identity for the spawned agent
 #
 # Options:
+#   --boot-prompt <text>    an initial task for the spawned agent. When given, the
+#                      boot prompt becomes the actas slash command followed
+#                      (newline-separated) by <text>, so the new agent claims
+#                      its identity AND acts on the task in its first turn —
+#                      handy for a codex peer (no Monitor), where a message
+#                      sent after spawn would never reach the idle session.
+#                      An empty string (`--boot-prompt ""`) means no task.
 #   --project <path>   project to launch in (default: $PWD)
 #   --team <team>      team to join <name> into (default: auto-resolved from
 #                      the project's existing registrations; required when the
@@ -37,6 +45,17 @@ set -euo pipefail
 #                      as the agent is launched (fire-and-forget)
 #   --ready-timeout N  seconds to wait for readiness before giving up
 #                      (default 90; on timeout, prints status=timeout, exit 3)
+#   --model <id>       launch the agent on a specific model. The id is passed
+#                      through to the CLI unchecked (the CLI rejects unknown
+#                      ids); the flag spelling comes from the type's manifest
+#                      `model_arg=`. Refused for a type with no model_arg.
+#
+# Spawn options: extra CLI args to always pass a given type's launched
+# binary (e.g. a default permission mode or sandbox policy), configured
+# per-type in a YAML file rather than hardcoded — see
+# scripts/lib/spawn-options.sh. File: $AGMSG_SPAWN_OPTIONS_FILE, else
+# ~/.agmsg/config/spawn_options.yaml. Optional; a missing file/section is a
+# no-op.
 #
 # Readiness: by default spawn blocks until the new agent's watcher attaches and
 # is receiving (it prints `status=ready ...`), so a leader can safely send work
@@ -58,6 +77,8 @@ source "$SCRIPT_DIR/lib/actas-lock.sh"
 source "$SCRIPT_DIR/lib/type-registry.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/storage.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/spawn-options.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/pane.sh"
 
@@ -100,15 +121,24 @@ fi
 
 # --- Parse options ---
 PROJECT="$PWD"
+PROMPT=""            # --boot-prompt: optional initial task appended to the actas prompt
+                     # (empty string = no task, so the `[ -n "$PROMPT" ]` guard
+                     #  below leaves the boot prompt unchanged)
 TEAM=""
 TMUX_TARGET="pane"   # pane | window
 SPLIT="h"            # h | v
 TERMINAL_TMPL=""     # --terminal override (resolved below if empty)
 WAIT_READY=1         # block until the spawned agent's watcher attaches
 READY_TIMEOUT=90     # seconds to wait for readiness before giving up
+MODEL_ID=""          # --model: pass-through model id for the launched CLI
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    # `${2?...}` (not `:?`) errors only when the arg is MISSING; an explicit
+    # empty string (`--boot-prompt ""`) is allowed through and treated as "no task"
+    # by the `[ -n "$PROMPT" ]` guard, so a scripted `--boot-prompt "$VAR"` with an
+    # empty VAR degrades to a plain spawn instead of aborting.
+    --boot-prompt)  PROMPT="${2?--boot-prompt needs a task}"; shift 2 ;;
     --project) PROJECT="${2:?--project needs a path}"; shift 2 ;;
     --team)    TEAM="${2:?--team needs a name}"; shift 2 ;;
     --window)  TMUX_TARGET="window"; shift ;;
@@ -116,6 +146,7 @@ while [ $# -gt 0 ]; do
     --terminal) TERMINAL_TMPL="${2:?--terminal needs a template}"; shift 2 ;;
     --no-wait) WAIT_READY=0; shift ;;
     --ready-timeout) READY_TIMEOUT="${2:?--ready-timeout needs seconds}"; shift 2 ;;
+    --model) MODEL_ID="${2:?--model needs a model id}"; shift 2 ;;
     *) die "unknown option: $1" ;;
   esac
 done
@@ -150,16 +181,51 @@ PROJECT="$(cd "$PROJECT" && pwd)"
 # external add-on); otherwise it is a direct-CLI launch. The `cli=` binary is
 # REQUIRED for direct-CLI types and OPTIONAL for node launchers (which resolve
 # their own runtime). No per-type case — all data-driven from the manifest.
+#
+# `cli=` is trusted manifest data (agmsg ships it, not runtime user input), so
+# it may be a single binary name OR a fixed command-line prefix of several
+# space-separated tokens — a subcommand and/or fixed flags a CLI needs before
+# its own options (e.g. `opencode run --interactive`, whose message is not a
+# top-level argument). Only the first word names the actual executable to
+# resolve/check; the rest are passed through as-is in the boot script below.
 SPAWN_LAUNCHER="$(agmsg_type_get "$AGENT_TYPE" spawn)"
 CLI_BIN="$(agmsg_type_get "$AGENT_TYPE" cli)"
+CLI_BIN_EXE="${CLI_BIN%% *}"
 CLI_PATH=""
 if [ -n "$CLI_BIN" ]; then
-  command -v "$CLI_BIN" >/dev/null 2>&1 \
-    || die "'$CLI_BIN' not found on PATH — install the ${AGENT_TYPE} CLI first"
-  CLI_PATH="$(command -v "$CLI_BIN")"
+  command -v "$CLI_BIN_EXE" >/dev/null 2>&1 \
+    || die "'$CLI_BIN_EXE' not found on PATH — install the ${AGENT_TYPE} CLI first"
+  CLI_PATH="$(command -v "$CLI_BIN_EXE")"
 elif [ -z "$SPAWN_LAUNCHER" ]; then
   die "agent type '$AGENT_TYPE' manifest declares neither a 'cli' binary nor a 'spawn' launcher"
 fi
+
+# --model is pass-through: the model id is handed to the CLI unchecked (the CLI
+# rejects an unknown id), so agmsg never has to track each vendor's model list.
+# The flag SPELLING differs per CLI, so it comes from the manifest `model_arg=`
+# (e.g. claude-code/grok-build use --model, codex uses -m). A type with no
+# model_arg has no known flag, so --model is refused rather than guessed.
+MODEL_ARG="$(agmsg_type_get "$AGENT_TYPE" model_arg)"
+if [ -n "$MODEL_ID" ] && [ -z "$MODEL_ARG" ]; then
+  die "agent type '$AGENT_TYPE' does not support --model (no model_arg in its manifest)"
+fi
+
+# Some CLIs don't accept the actas prompt as a bare positional argument — they
+# require it as the value of a named flag instead (e.g. antigravity's
+# `--prompt-interactive <text>`, copilot's `-i/--interactive <text>`; their
+# `-p/--prompt` equivalents are a DIFFERENT one-shot, non-interactive mode and
+# would not work here). `prompt_arg=` in the manifest names that flag; unset
+# (the default) keeps today's bare-positional behavior.
+PROMPT_ARG="$(agmsg_type_get "$AGENT_TYPE" prompt_arg)"
+
+# Extra CLI args for this type from the spawn options file (opt-in, see
+# scripts/lib/spawn-options.sh). Read line-by-line — never word-split — so a
+# value containing spaces stays a single token.
+SPAWN_OPT_TOKENS=()
+while IFS= read -r _spawn_opt_tok; do
+  SPAWN_OPT_TOKENS+=("$_spawn_opt_tok")
+done < <(agmsg_spawn_options_tokens "$AGENT_TYPE")
+
 # Resolve the node launcher path from the manifest (not hardcoded), if any.
 SPAWN_AGENT=""
 if [ -n "$SPAWN_LAUNCHER" ]; then
@@ -257,10 +323,19 @@ AGMSG_RESOLVE_PROJECT=0 "$SCRIPT_DIR/join.sh" "$TEAM" "$NAME" "$AGENT_TYPE" "$PR
 # the skill dir basename so a custom install (e.g. `m`) spawns the target
 # type's prefix plus `m actas <name>` rather than a nonexistent hardcoded
 # command.
+#
+# When --boot-prompt is given, append the task newline-separated so the agent claims
+# its identity AND acts on the task in the same first turn. This is the only way
+# to hand a one-shot goal to a codex peer, which has no Monitor and so never
+# notices a message sent after it goes idle (see docs/codex-monitor-beta.md).
 CMD_NAME="$(basename "$SKILL_DIR")"
 ACTAS_PREFIX="$(agmsg_type_get "$AGENT_TYPE" actas_prefix)"
 [ -n "$ACTAS_PREFIX" ] || ACTAS_PREFIX="/"
 ACTAS_PROMPT="${ACTAS_PREFIX}${CMD_NAME} actas ${NAME}"
+if [ -n "$PROMPT" ]; then
+  ACTAS_PROMPT="${ACTAS_PROMPT}
+${PROMPT}"
+fi
 
 BOOT_DIR="${TMPDIR:-/tmp}/agmsg-spawn"
 mkdir -p "$BOOT_DIR" 2>/dev/null || true
@@ -280,14 +355,32 @@ BOOT="$BOOT.command"
   if [ -n "$SPAWN_AGENT" ]; then
     # Node-launcher path: pass the universal agmsg context + the actas prompt.
     # Type-specific config is the launcher's own default/env, so core stays
-    # generic and names no add-on.
+    # generic and names no add-on. Spawn-options tokens (if any) land before
+    # --initial-input, same relative position as the direct-CLI path below.
     printf '%q %q \\\n' "$NODE_BIN" "$SPAWN_AGENT"
     printf '  --name %q \\\n' "$NAME"
     printf '  --team %q \\\n' "$TEAM"
     printf '  --project %q \\\n' "$PROJECT"
+    for _tok in ${SPAWN_OPT_TOKENS[@]+"${SPAWN_OPT_TOKENS[@]}"}; do
+      printf '  %q \\\n' "$_tok"
+    done
     printf '  --initial-input %q\n' "$ACTAS_PROMPT"
   else
-    printf '%q %q\n' "$CLI_PATH" "$ACTAS_PROMPT"
+    # Direct-CLI launch:
+    # `<cli> [<model_arg> <model_id>] [spawn-options...] [<prompt_arg>] "/<cmd> actas <name>"`.
+    # cli is emitted unquoted — it is trusted fixed-prefix manifest data (see
+    # above) that may itself be several tokens (e.g. `opencode run --interactive`).
+    # model_arg/prompt_arg are the manifest flag spellings (not %q-quoted — bare
+    # flags like --model or -i); the model id, every spawn-options token, and the
+    # actas prompt are quoted. prompt_arg (when set) lands immediately before the
+    # prompt so there is no ambiguity about which token is its value.
+    printf '%s' "$CLI_BIN"
+    [ -n "$MODEL_ID" ] && printf ' %s %q' "$MODEL_ARG" "$MODEL_ID"
+    for _tok in ${SPAWN_OPT_TOKENS[@]+"${SPAWN_OPT_TOKENS[@]}"}; do
+      printf ' %q' "$_tok"
+    done
+    [ -n "$PROMPT_ARG" ] && printf ' %s' "$PROMPT_ARG"
+    printf ' %q\n' "$ACTAS_PROMPT"
   fi
   echo 'rm -f "$0" 2>/dev/null'   # self-clean once the agent exits
   echo 'exec "${SHELL:-/bin/bash}" -i'
@@ -515,12 +608,15 @@ place_and_launch() {
 # receiving. Block until that appears so the leader doesn't send a job into the
 # cold-start window (before the watcher attaches) and lose it.
 #
-# Types without a Monitor (manifest `monitor=no`) never touch the readiness
-# sentinel, so skip the wait for them (their receive is poll-based anyway).
+# Types with `monitor=no` do not produce a spawn-awaitable readiness sentinel, so
+# skip the wait. That covers types with no Monitor at all (codex) AND types whose
+# watcher attaches via the agent's own launch rather than a spawn-time sentinel
+# (grok-build, whose monitor mode is real but not awaitable here) — receive there
+# is poll-based or agent-launched anyway.
 READY_PATH="$(agmsg_ready_path "$TEAM" "$NAME")"
 if [ "$(agmsg_type_get "$AGENT_TYPE" monitor)" = "no" ] && [ "$WAIT_READY" = "1" ]; then
   WAIT_READY=0
-  echo "spawn: '$AGENT_TYPE' has no Monitor — skipping readiness wait (--no-wait implied)" >&2
+  echo "spawn: '$AGENT_TYPE' has no spawn readiness handshake — skipping readiness wait (--no-wait implied)" >&2
 fi
 
 # Clear any stale sentinel before launching so we only observe THIS spawn's

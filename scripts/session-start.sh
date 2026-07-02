@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/compat.sh"
 
 # SessionStart hook for delivery modes `monitor` and `both`.
 #
@@ -64,15 +66,22 @@ else
   agmsg_session_start_default
 fi
 
-# Read hook input JSON from stdin. session_id field is sent for SessionStart.
+# Read hook input JSON from stdin. The session id field name differs by vendor:
+# Claude Code emits snake_case "session_id"; Grok Build (and Cursor) emit
+# camelCase "sessionId". Try snake first (claude-code unaffected), then camel,
+# then the GROK_SESSION_ID env Grok injects into every hook.
 INPUT=$(cat 2>/dev/null || true)
 SESSION_ID=""
 if [ -n "$INPUT" ]; then
   SESSION_ID=$(printf '%s' "$INPUT" \
     | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -1)
+  [ -z "$SESSION_ID" ] && SESSION_ID=$(printf '%s' "$INPUT" \
+    | sed -n 's/.*"sessionId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1)
 fi
-# Fallback so the instruction is still actionable even outside CC's hook flow.
+[ -z "$SESSION_ID" ] && SESSION_ID="${GROK_SESSION_ID:-}"
+# Fallback so the instruction is still actionable even outside a hook flow.
 [ -z "$SESSION_ID" ] && SESSION_ID="unknown-$$"
 
 mkdir -p "$RUN_DIR" 2>/dev/null || true
@@ -129,7 +138,7 @@ for f in "$RUN_DIR"/cc-instance.*; do
         # Defensive: only kill if the pid's command line actually matches
         # our watch.sh. Defends against pid recycling — a stale pidfile
         # could point at an unrelated process that took the same pid.
-        cmd=$(ps -o args= -p "$orphan_pid" 2>/dev/null || true)
+        cmd=$(compat_get_cmdline "$orphan_pid" 2>/dev/null || true)
         case "$cmd" in
           *"$SKILL_DIR/scripts/watch.sh"*) kill "$orphan_pid" 2>/dev/null || true ;;
           *) ;;  # not our watcher anymore; leave it alone
@@ -208,6 +217,24 @@ if [ -n "$CC_PID" ]; then
     fi
   fi
   printf '%s\n' "$INSTANCE_ID" > "$STATE"
+fi
+
+# --- Skip directive when a watcher is already alive for this instance. ---
+# /compact re-fires SessionStart within the same CC process and session_id, so
+# INSTANCE_ID is identical to the already-running watcher's.  Without this
+# guard the agent spawns a second Monitor whose watch.sh kills the incumbent,
+# the old Monitor task emits "stream ended", and the agent loops trying to
+# restart.  Mirrors emit_monitor_directive in delivery.sh.
+WATCHER_PIDFILE="$RUN_DIR/watch.$INSTANCE_ID.pid"
+if [ -f "$WATCHER_PIDFILE" ]; then
+  existing=$(cat "$WATCHER_PIDFILE" 2>/dev/null || true)
+  if [ -n "$existing" ] && kill -0 "$existing" 2>/dev/null; then
+    cat <<EOF
+AGMSG monitor mode: a watch.sh is already streaming for this session (pid $existing).
+No action needed — the existing watcher is the active one.
+EOF
+    exit 0
+  fi
 fi
 
 WATCH="$SKILL_DIR/scripts/watch.sh"

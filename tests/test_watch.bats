@@ -10,6 +10,11 @@ load test_helper
 setup() {
   setup_test_env
   export AGMSG_PANE_BACKEND=none
+  # On MSYS2, the compat shim makes the ppid walk succeed; _iid() (bats
+  # subshell) and watch.sh (standalone bash) have different process trees, so
+  # the walk can produce different instance IDs. Pin to bare-sid on MSYS2 so
+  # both contexts agree deterministically.
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) export AGMSG_AGENT_PID="" ;; esac
   export PROJ="/tmp/agmsg-watch-proj"
   bash "$SCRIPTS/join.sh" team alice claude-code "$PROJ" >/dev/null
 }
@@ -22,7 +27,7 @@ teardown() {
 # Returns once the watcher has been stopped.
 run_watcher_for() {
   local sid="$1" out="$2" secs="$3"
-  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$sid" "$PROJ" claude-code >"$out" 2>/dev/null &
+  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$sid" "$PROJ" claude-code >"$out" 2>/dev/null 3>&- &
   local pid=$!
   sleep "$secs"
   kill "$pid" 2>/dev/null || true
@@ -111,11 +116,12 @@ _wait_for_file_contains() {
 }
 
 @test "watch: restart delivers messages that arrived while the watcher was down" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
   local sid="sess-restart"
 
   # First watcher: fresh session, takes its mark at MAX(id)=0, then streams M1.
   AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$sid" "$PROJ" claude-code \
-    >"$TEST_SKILL_DIR/out1.log" 2>/dev/null &
+    >"$TEST_SKILL_DIR/out1.log" 2>/dev/null 3>&- &
   local w1=$!
   sleep 1.5
   bash "$SCRIPTS/send.sh" team bob alice "M1-before-stop" >/dev/null
@@ -137,11 +143,12 @@ _wait_for_file_contains() {
 }
 
 @test "watch: a fresh session starts from now and does not replay history" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
   # Pre-existing message before any watcher for this session ever runs.
   bash "$SCRIPTS/send.sh" team bob alice "M0-history" >/dev/null
 
   AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "sess-fresh" "$PROJ" claude-code \
-    >"$TEST_SKILL_DIR/fresh.log" 2>/dev/null &
+    >"$TEST_SKILL_DIR/fresh.log" 2>/dev/null 3>&- &
   local w=$!
   sleep 1.5
   bash "$SCRIPTS/send.sh" team bob alice "M-live" >/dev/null
@@ -155,11 +162,13 @@ _wait_for_file_contains() {
 }
 
 @test "watch: persists a watermark file for the session" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
   run_watcher_for "sess-wm" "$TEST_SKILL_DIR/wm.log" 1.5
   [ -f "$TEST_SKILL_DIR/run/watch.$(_iid sess-wm).watermark" ]
 }
 
 @test "watch: exits within one interval when its session dies, without advancing the watermark past an undelivered row (#67)" {
+  skip_on_windows "watcher session liveness under Git Bash (#182)"
   # REWRITTEN from "closed consumer does not advance watermark...". The old test
   # asserted that a closed *downstream* consumer (`watch.sh | head -n 1`) made
   # the watcher stop and not advance the watermark. That contract is unachievable
@@ -181,7 +190,7 @@ _wait_for_file_contains() {
   local pf="$TEST_SKILL_DIR/run/watch.$iid.pid"
   local out="$TEST_SKILL_DIR/liveness-delivery.log"
 
-  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$iid" "$PROJ" claude-code >"$out" 2>/dev/null &
+  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$iid" "$PROJ" claude-code >"$out" 2>/dev/null 3>&- &
   local w=$!
   # Wait for the watermark file, not just the pidfile: the pidfile is written
   # early (before the subscription is resolved and LAST is seeded), so sending a
@@ -211,13 +220,14 @@ _wait_for_file_contains() {
 }
 
 @test "watch: closed stdout exits without advancing the watermark" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
   local sid="sess-stdout-closed"
   local iid="$(_iid "$sid")"
   local wm="$TEST_SKILL_DIR/run/watch.$iid.watermark"
   local pf="$TEST_SKILL_DIR/run/watch.$iid.pid"
 
   AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$sid" "$PROJ" claude-code \
-    1>&- 2>/dev/null &
+    1>&- 2>/dev/null 3>&- &
   local w=$!
 
   _wait_for_file "$wm"
@@ -249,9 +259,10 @@ _wait_for_file_contains() {
 }
 
 @test "watch: actas-mode watcher creates a ready sentinel and removes it on exit" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
   local ready="$TEST_SKILL_DIR/run/ready.team__alice"
   AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "sess-ready" "$PROJ" claude-code alice \
-    >/dev/null 2>&1 &
+    >/dev/null 2>&1 3>&- &
   local w=$!
   # Wait for the watcher to attach and signal readiness.
   local i
@@ -274,9 +285,10 @@ _wait_for_file_contains() {
 }
 
 @test "watch: ready sentinel records the owner session_id" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
   local ready="$TEST_SKILL_DIR/run/ready.team__alice"
   AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "sess-own" "$PROJ" claude-code alice \
-    >/dev/null 2>&1 &
+    >/dev/null 2>&1 3>&- &
   local w=$! i
   for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$ready" ] && break; sleep 0.5; done
   # watch.sh stamps the instance id (composite under an agent ancestor).
@@ -288,7 +300,7 @@ _wait_for_file_contains() {
 @test "watch: cleanup leaves a sentinel that a successor session re-owned" {
   local ready="$TEST_SKILL_DIR/run/ready.team__alice"
   AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "sess-old" "$PROJ" claude-code alice \
-    >/dev/null 2>&1 &
+    >/dev/null 2>&1 3>&- &
   local w=$! i
   for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$ready" ] && break; sleep 0.5; done
   # A successor watcher overwrites the sentinel with its own id.
@@ -300,7 +312,43 @@ _wait_for_file_contains() {
   [ "$(cat "$ready")" = "sess-new" ]
 }
 
+@test "session-start: skips directive when watcher already alive (compact dedup)" {
+  skip_on_windows "#134"
+  bash "$SCRIPTS/join.sh" team alice claude-code "$PROJ" >/dev/null
+  mkdir -p "$TEST_SKILL_DIR/run"
+
+  # Start a watcher so a pidfile exists with a live pid.
+  AGMSG_WATCH_INTERVAL=60 bash "$SCRIPTS/watch.sh" "sess1" "$PROJ" claude-code \
+    >/dev/null 2>&1 &
+  local wpid=$!
+
+  # Resolve the instance id session-start.sh will compute for "sess1".
+  local iid
+  iid=$(_iid "sess1")
+  local pf="$TEST_SKILL_DIR/run/watch.$iid.pid"
+  _wait_for_file "$pf"
+
+  # Record cc-instance so the dedup path sees "same instance".
+  echo "$iid" > "$TEST_SKILL_DIR/run/cc-instance.$$"
+
+  # Fire session-start with the same session_id (simulates /compact re-fire).
+  local out
+  out=$(printf '{"session_id":"sess1"}' \
+    | bash "$SCRIPTS/session-start.sh" claude-code "$PROJ" 2>/dev/null || true)
+
+  # The directive must NOT tell the agent to invoke Monitor.
+  [[ "$out" == *"already streaming"* ]]
+  [[ "$out" != *"invoke the Monitor tool"* ]]
+
+  # The original watcher must still be alive.
+  kill -0 "$wpid" 2>/dev/null
+
+  kill "$wpid" 2>/dev/null || true
+  wait "$wpid" 2>/dev/null || true
+}
+
 @test "session-start: GCs stale watermark/ready but keeps live ones" {
+  skip_on_windows "watcher live-owner liveness under Git Bash (#182)"
   bash "$SCRIPTS/join.sh" team alice claude-code "$PROJ" >/dev/null
   mkdir -p "$TEST_SKILL_DIR/run"
   # Stale (owner has no live cc-instance).
@@ -333,6 +381,7 @@ _wait_pidfile() {
 }
 
 @test "watch: two sessions sharing a session_id keep independent watchers (#93)" {
+  skip_on_windows "watcher process mgmt under Git Bash (#182)"
   # Pre-composite instance ids (same sid prefix, different agent pid) — what
   # session-start bakes into the directive for two parallel resume processes.
   # The embedded pids must be live: the liveness guard (#67) exits a watcher
@@ -365,6 +414,7 @@ _wait_pidfile() {
 }
 
 @test "watch: relaunch with the SAME instance id replaces the previous watcher (#66 preserved)" {
+  skip_on_windows "watcher process mgmt under Git Bash (#182)"
   # The composite instance id's pid must belong to a LIVE process: the watcher's
   # liveness guard (#67) exits any watcher whose embedded session pid is dead, so
   # a fabricated dead pid (the old "solo.2002") would self-exit before the
@@ -391,4 +441,71 @@ _wait_pidfile() {
   kill "$w2" "$sesspid" 2>/dev/null || true
   wait "$w2" 2>/dev/null || true
   wait "$sesspid" 2>/dev/null || true
+}
+
+# DB-open healthcheck (#197): a store that exists but cannot be opened (the
+# native sqlite3.exe / Git Bash /c/ path mismatch, or bad perms) must surface a
+# loud error rather than spin silently delivering nothing.
+@test "watch: surfaces an unopenable DB once instead of spinning silently (#197)" {
+  [ "$(id -u)" -eq 0 ] && skip "chmod 000 is ineffective as root"
+  local DB="$TEST_SKILL_DIR/db/messages.db"
+  [ -f "$DB" ]                # init-db.sh created it in setup_test_env
+  chmod 000 "$DB"
+  local out="$BATS_TEST_TMPDIR/hc.out"
+  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "sess-hc" "$PROJ" claude-code >"$out" 2>/dev/null 3>&- &
+  local pid=$!
+  sleep 2                     # > one poll interval; a spinning watcher would re-emit
+  kill "$pid" 2>/dev/null || true   # no-op if the healthcheck already exited
+  wait "$pid" 2>/dev/null || true
+  chmod 644 "$DB" 2>/dev/null || true
+  # Exactly one line: 0 would mean a silent spin, >1 a re-emitting loop.
+  [ "$(grep -c 'ERROR: cannot open message DB' "$out")" -eq 1 ]
+}
+
+# Empty session_id fallback (#236 grok monitor): Grok's `monitor` tool may run
+# the launch command with an empty $GROK_SESSION_ID, so watch.sh must self-assign
+# an id and start, not die with a "Usage" error (which left the monitor down).
+# No silent message loss across a burst (#245): the head-5 truncation bug had a
+# grok agent append `| head -5` to the monitor command, so after the 5th line the
+# consumer closed and later messages were dropped while the watermark advanced
+# past them. With the watcher streaming normally (no downstream truncation), a
+# burst of N>5 consecutive messages must ALL be delivered.
+@test "watch: delivers a burst of 8 consecutive messages without loss (#245)" {
+  skip_on_windows "watcher background launch under Git Bash (#182)"
+  local sid="sess-burst"
+  local out="$TEST_SKILL_DIR/burst.log"
+  local wm="$TEST_SKILL_DIR/run/watch.$(_iid "$sid").watermark"
+
+  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "$sid" "$PROJ" claude-code >"$out" 2>/dev/null &
+  local w=$!
+  _wait_for_file "$wm"          # ready to receive (watermark seeded)
+
+  local n
+  for n in 1 2 3 4 5 6 7 8; do
+    bash "$SCRIPTS/send.sh" team bob alice "BURST-$n" >/dev/null
+  done
+
+  # Wait for the last one to arrive, then assert EVERY message is present.
+  _wait_for_file_contains "$out" "BURST-8" || { kill "$w" 2>/dev/null || true; false; }
+  kill "$w" 2>/dev/null || true
+  wait "$w" 2>/dev/null || true
+
+  for n in 1 2 3 4 5 6 7 8; do
+    grep -q "BURST-$n" "$out"
+  done
+}
+
+@test "watch: empty session_id gets a generated fallback instead of a Usage error (#236)" {
+  local out="$BATS_TEST_TMPDIR/empty-sid.out"
+  AGMSG_WATCH_INTERVAL=1 bash "$SCRIPTS/watch.sh" "" "$PROJ" claude-code alice >"$out" 2>&1 3>&- &
+  local pid=$!
+  # A fallback id means a watch.agmsg-*.pid appears under run/ as the watcher arms.
+  local i started=0
+  for i in $(seq 1 25); do
+    if ls "$TEST_SKILL_DIR/run"/watch.agmsg-*.pid >/dev/null 2>&1; then started=1; break; fi
+    sleep 0.2
+  done
+  kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+  [ "$started" -eq 1 ]
+  ! grep -q "Usage: watch.sh" "$out"
 }

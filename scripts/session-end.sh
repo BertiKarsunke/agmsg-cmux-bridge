@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/compat.sh"
 
 # SessionEnd hook — symmetric counterpart of session-start.sh.
 #
@@ -57,7 +59,7 @@ if [ -f "$PIDFILE" ]; then
     # Defensive: only kill if the pid's command line still looks like our
     # watch.sh. Pids can be recycled — a stale pidfile could point at an
     # unrelated process that took the same pid.
-    cmd=$(ps -o args= -p "$pid" 2>/dev/null || true)
+    cmd=$(compat_get_cmdline "$pid" 2>/dev/null || true)
     case "$cmd" in
       *"$SKILL_DIR/scripts/watch.sh"*) kill "$pid" 2>/dev/null || true ;;
       *) ;;

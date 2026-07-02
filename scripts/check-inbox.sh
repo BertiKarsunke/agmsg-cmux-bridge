@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/lib/compat.sh"
 
 # Check inbox across all teams with cooldown. Skips if last check was < 60 seconds ago.
 # Usage: check-inbox.sh <type> <project_path>
@@ -40,11 +42,17 @@ if echo "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' 2>/
 fi
 
 # Defer to the monitor watcher when one is alive for this session.
-# Avoids double-delivery when delivery.mode = both. session_id is sent in
-# the hook input JSON for Stop events.
+# Avoids double-delivery when delivery.mode = both. The session id field name
+# differs by vendor: Claude Code emits snake_case "session_id"; Grok Build (and
+# Cursor) emit camelCase "sessionId". Try snake first (claude-code unaffected),
+# then camel, then the GROK_SESSION_ID env Grok injects into every hook.
 SESSION_ID=$(printf '%s' "$INPUT" \
   | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   | head -1)
+[ -z "$SESSION_ID" ] && SESSION_ID=$(printf '%s' "$INPUT" \
+  | sed -n 's/.*"sessionId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  | head -1)
+[ -z "$SESSION_ID" ] && SESSION_ID="${GROK_SESSION_ID:-}"
 if [ -n "$SESSION_ID" ]; then
   # The monitor watcher keys its pidfile (and its actas owner, below) on the
   # per-process instance id (#93), not the bare session_id. Normalize to the
@@ -75,11 +83,7 @@ MARKER_HASH=$(printf '%s\t%s' "$PROJECT" "$TYPE" | cksum | awk '{print $1}')
 MARKER="$SKILL_DIR/run/.lastcheck-${TYPE}-${MARKER_HASH}"
 
 if [ -f "$MARKER" ]; then
-  if [ "$(uname)" = "Darwin" ]; then
-    last=$(stat -f %m "$MARKER")
-  else
-    last=$(stat -c %Y "$MARKER")
-  fi
+  last=$(compat_file_mtime "$MARKER")
   now=$(date +%s)
   # Prefer the new delivery.turn.check_interval; fall back to legacy
   # hook.check_interval for users who haven't migrated.
@@ -108,6 +112,17 @@ while IFS=$'\t' read -r team agent; do
   [ -n "$team" ] || continue
   [ -n "$agent" ] || continue
   state=$(actas_lock_state "$team" "$agent" "${SESSION_ID:-}")
+  # Honor actas exclusivity locks. If (team, AGENT) is currently held by
+  # another live session, that session is the owner of that role's inbox —
+  # don't deliver here. Mirrors the per-pair filtering watch.sh does for
+  # CC sessions (#62), giving Stop-hook delivery (codex / claude-code
+  # turn-mode) the same "respect peer locks" guarantee.
+  #
+  # Note: AGENT comes from whoami.sh, which returns the first registered
+  # agent for (project, type). It is NOT the session's in-memory actas
+  # role. That asymmetry is the Codex caveat documented in README — if a
+  # Codex session actas'd into <name>, check-inbox is still polling
+  # whatever whoami chose first, not <name>.
   case "$state" in
     other:*) continue ;;
   esac

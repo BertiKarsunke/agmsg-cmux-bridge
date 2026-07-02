@@ -5,3 +5,7 @@ teams/
 .codex/
 .claude/
 .opencode/
+
+/.omc/
+/.omx/
+/backlog/
