@@ -52,9 +52,29 @@ To remove a single role:
 /agmsg drop <name>
 ```
 
+To wipe every agent registered to the current project/type at once, ask your agent to run `reset.sh <project> <type> all`. Registrations of the same agents on *other* projects/types are untouched; a team left with no members is removed.
+
 ## Leaving a team entirely
 
 There's no slash-command shortcut for "leave team X across all projects". Ask your agent to leave — it knows the script (`leave.sh <team> <agent>`) and will run it for you. All registrations across all projects for that `(team, agent)` pair are removed; messages already in the DB stay.
+
+To tear down a whole team in one shot, run `leave.sh <team> all` — it removes every agent and deletes the team. Unlike `reset.sh … all` (which is scoped to one project/type), this drops the agents regardless of which projects they were registered to.
+
+### Leaving automatically on session exit
+
+By default a session ending does **not** leave the team — registrations persist so the agent rejoins as the same role on the next launch. Set `AGMSG_LEAVE_ON_EXIT=1` (export it in your shell profile so the SessionEnd hook process inherits it) to instead clear this project/type's registration when the session ends. Two caveats: it only fires on a *graceful* exit — a hard kill, crash, or abruptly closed terminal never runs the SessionEnd hook, so dead-process cleanup still relies on liveness GC — and it no-ops when the project/type has more than one identity, since the hook can't tell which role this session was.
+
+### Liveness tags and GC on `team`
+
+`team.sh` tags each member by the liveness of its pane marker (`run/pane.<team>.<agent>.json`, the same signal `send.sh` uses for pane-push):
+
+- `[live]` — the member's pane is alive on this host.
+- `[stale]` — the marker's backend tool is on this host and the pane is gone.
+- *(no tag)* — no marker (an idle/persistent registration), or the marker's backend tool isn't on this host (a pane on another machine). Both deliberately abstain.
+
+Listing is read-only by default. Set `AGMSG_GC_ON_LIST=1` to also *remove* the `[stale]` members as a side effect of listing — the lazy backstop for the hard kills `AGMSG_LEAVE_ON_EXIT` misses. Only `[stale]` members are dropped; `[live]` and untagged members are never touched.
+
+Limits worth knowing: a pane being alive only proves the *terminal pane* exists, not that the agent CLI is still running inside it (an agent quit but its pane left open reads as `[live]`); and because there is a single pane marker per `(team, agent)`, GC'ing a `[stale]` member drops all of that agent's registrations on this team, including any on a project that's actually still live elsewhere. GC is intentionally opt-in for these reasons.
 
 ## Renaming a team
 

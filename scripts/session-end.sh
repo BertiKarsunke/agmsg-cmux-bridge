@@ -40,6 +40,20 @@ if [ -n "$INPUT" ]; then
     | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -1)
 fi
+# Opt-in: leave the team when the session ends. OFF by default — the identity
+# model deliberately keeps registrations across restarts so an agent rejoins as
+# the same role (see docs/teams.md). Set AGMSG_LEAVE_ON_EXIT=1 to instead clear
+# this project/type's registration on exit. Caveats: it only fires on a graceful
+# SessionEnd (a hard kill/crash never runs this hook — liveness GC is the
+# backstop), and it no-ops when the project/type has more than one identity,
+# since reset.sh can't tell which role this session was (exits non-zero there).
+# Best-effort and must never block teardown, hence `|| true`.
+case "${AGMSG_LEAVE_ON_EXIT:-}" in
+  1|true|yes|on)
+    bash "$SCRIPT_DIR/reset.sh" "$PROJECT" "$TYPE" "" "$SESSION_ID" >/dev/null 2>&1 || true
+    ;;
+esac
+
 [ -z "$SESSION_ID" ] && exit 0
 
 # Re-derive the per-process instance id this session's watcher/locks are keyed

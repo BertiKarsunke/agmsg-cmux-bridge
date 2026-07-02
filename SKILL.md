@@ -77,8 +77,9 @@ Pane commands:
 # List team members
 ~/.agents/skills/agmsg/scripts/team.sh <team>
 
-# Leave a team
-~/.agents/skills/agmsg/scripts/leave.sh <team> <agent_id>
+# Leave a team. Pass "all" as <agent_id> to remove every agent (the team is
+# then removed).
+~/.agents/skills/agmsg/scripts/leave.sh <team> <agent_id|all>
 
 # Rename a team (moves dir, updates config + messages).
 # After renaming, each existing member should re-run whoami.sh to refresh
@@ -93,7 +94,8 @@ Pane commands:
 # Clear registrations for the current project/type.
 # A trailing <session_id> additionally releases any actas exclusivity locks
 # this session held on <agent_id> so peers can pick them up immediately.
-~/.agents/skills/agmsg/scripts/reset.sh "$(pwd)" <type> [agent_id] [session_id]
+# Pass "all" as <agent_id> to clear every agent registered to this project/type.
+~/.agents/skills/agmsg/scripts/reset.sh "$(pwd)" <type> [agent_id|all] [session_id]
 
 # Set delivery mode for this project.
 #   monitor — real-time push via SessionStart + Monitor tool (claude-code only)

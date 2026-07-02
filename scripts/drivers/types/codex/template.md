@@ -82,9 +82,12 @@ Four possible outputs:
 **Only use scripts in `~/.agents/skills/__SKILL_NAME__/scripts/` — do not read or modify files under `teams/` or `db/` directly.**
 
 **If no arguments provided (DEFAULT action — always do this when the command is invoked without arguments):**
-1. **IMMEDIATELY** run inbox check for each TEAM: `~/.agents/skills/__SKILL_NAME__/scripts/inbox.sh $TEAM $AGENT`
-2. Do NOT ask the user what to do — just run the inbox check.
-3. If there are messages, read and respond appropriately. To reply:
+1. **(best-effort) Refresh this session's pane** so peers can pane-push to your live surface. For each TEAM run:
+   `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh register $TEAM $AGENT codex "$(pwd)"`
+   Codex registers a pane at join/actas only; refreshing here keeps you reachable after a restart or re-split. If this is not a tmux/cmux/wezterm pane, ignore the failure and continue.
+2. **IMMEDIATELY** run inbox check for each TEAM: `~/.agents/skills/__SKILL_NAME__/scripts/inbox.sh $TEAM $AGENT`
+3. Do NOT ask the user what to do — just run the inbox check.
+4. If there are messages, read and respond appropriately. To reply:
    `~/.agents/skills/__SKILL_NAME__/scripts/send.sh $TEAM $AGENT <to_agent> "<message>"`
 
 If argument is "history":
@@ -107,6 +110,16 @@ If argument starts with "config set" (e.g. "config set hook.check_interval 30"):
 2. Run: `~/.agents/skills/__SKILL_NAME__/scripts/config.sh set <key> <value>`
 
 
+If argument starts with "pane" (e.g. "pane", "pane register", "pane status", "pane doctor", "pane test", "pane unregister"):
+1. Parse the subcommand. If none is given, default to `status`. Supported: `register`, `status`, `doctor`, `test`, `unregister`.
+2. For `register` — record/refresh this session's live pane so peers can pane-push to it. Run once per TEAM you belong to:
+   `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh register $TEAM $AGENT codex "$(pwd)"`
+   This is the same registration `join`/`actas` does; run it any time after a restart or re-split, or whenever a peer reports a message was "delivered via inbox only". If this is not a tmux/cmux/wezterm pane, it prints that no pane was detected — that is expected, just continue (messaging still works via the inbox).
+3. For `status` / `doctor` / `test` / `unregister` — run the matching subcommand:
+   `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh <subcommand> $TEAM $AGENT`
+   (`status` lists registrations, `doctor` diagnoses backend + liveness, `test` injects a ping into the registered pane, `unregister` removes it.)
+4. Show the output to the user.
+
 If argument starts with "actas" followed by an agent name (e.g. "actas alice"):
 1. Parse the new role name.
 2. Run `~/.agents/skills/__SKILL_NAME__/scripts/identities.sh "$(pwd)" codex` to see whether the role is already registered for this (project, type).
@@ -126,7 +139,7 @@ If argument starts with "drop" followed by an agent name (e.g. "drop alice"):
 If argument starts with "spawn" (e.g. "spawn claude-code alice", "spawn codex reviewer --window"):
 1. Parse `<type>` (must be `claude-code` or `codex`), `<name>`, and any options (`--project`, `--team`, `--window`, `--split h|v`, `--terminal`, `--no-wait`, `--ready-timeout <secs>`).
 2. Run: `~/.agents/skills/__SKILL_NAME__/scripts/spawn.sh <type> <name> --project "$(pwd)" [options]`
-   - spawn.sh pre-joins `<name>`, then opens a tmux pane/window (when this session is inside tmux) or a new OS terminal, and launches the target CLI with `/__SKILL_NAME__ actas <name>` as its initial prompt.
+   - spawn.sh pre-joins `<name>`, then opens a tmux pane/window (when this session is inside tmux) or a new OS terminal, and launches the target CLI with `$__SKILL_NAME__ actas <name>` as its initial prompt.
    - By default it BLOCKS until a spawned claude-code agent's watcher attaches (`status=ready`); `status=timeout` + exit 3 if not ready within `--ready-timeout` (default 90s). `--no-wait` for fire-and-forget. Spawning a codex agent skips the wait (codex has no Monitor).
    - It refuses early if `<name>` is already held by another live session, if the target CLI is not installed, or if there is no tmux and no usable terminal (headless).
 3. Show the script's output.

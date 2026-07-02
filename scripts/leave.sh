@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: leave.sh <team> <agent_id>
+# Usage: leave.sh <team> <agent_id|all>
 #
 # Removes an agent from a team. Removes the team if empty.
+# Pass "all" as agent_id to remove every agent (the team is then removed).
 
-TEAM="${1:?Usage: leave.sh <team> <agent_id>}"
+TEAM="${1:?Usage: leave.sh <team> <agent_id|all>}"
 AGENT_ID="${2:?Missing agent_id}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -31,6 +32,16 @@ fi
 # can't be clobbered (#141). The team dir exists (checked above); read the config
 # under the lock.
 agmsg_lock_acquire "$TEAMS_DIR/$TEAM" || exit 1
+
+# "all" — remove every agent; the team is then empty, so remove it outright.
+if [ "$AGENT_ID" = "all" ]; then
+  rm -f "$TEAM_CONFIG"
+  agmsg_lock_release
+  rmdir "$TEAMS_DIR/$TEAM" 2>/dev/null || true
+  echo "Left team $TEAM (all agents removed — team removed)"
+  exit 0
+fi
+
 CONFIG_ESCAPED=$(sed "s/'/''/g" "$TEAM_CONFIG")
 
 # Check if agent exists
@@ -38,6 +49,7 @@ EXISTS=$(agmsg_sqlite_mem ".param set :json '$CONFIG_ESCAPED'" \
   "SELECT json_extract(:json, '$.agents.$AGENT_ID');")
 if [ -z "$EXISTS" ] || [ "$EXISTS" = "null" ]; then
   echo "Agent $AGENT_ID not in team $TEAM"
+  agmsg_lock_release
   exit 1
 fi
 

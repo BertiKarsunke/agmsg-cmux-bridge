@@ -18,6 +18,13 @@ source "$SCRIPT_DIR/lib/actas-lock.sh"
 source "$SCRIPT_DIR/lib/resolve-project.sh"  # agmsg_agent_pid, for instance-id derivation
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/type-registry.sh"
+# Optional: pane helpers for turn-mode pane-push. Sourced best-effort so a
+# checkout without the pane lib (or a stripped install) still delivers via the
+# inbox. Lets this Stop hook keep the session's pane registration fresh (below).
+if [ -f "$SCRIPT_DIR/lib/pane.sh" ]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/lib/pane.sh" || true
+fi
 
 # Some Stop-hook runtimes (codex, copilot) want an explicit JSON status object
 # even when there is nothing to deliver; others (claude-code) stay silent. This
@@ -98,6 +105,26 @@ fi
 
 mkdir -p "$SKILL_DIR/run"
 touch "$MARKER"
+
+# Best-effort: keep this session's pane registration fresh so peers can
+# pane-push to the live surface. Turn-mode agents (codex, gemini, ...) only
+# register a pane at join/actas; without this a session that moved to a new
+# pane (restart, re-split) becomes unreachable by pane-push until it rejoins.
+# Runs once per delivery interval (after the cooldown gate), independent of
+# whether the message store exists or has new rows. No-op when pane-push is
+# disabled or no tmux/cmux/wezterm backend is present. Only refresh pairs this
+# session owns — skip roles an actas elsewhere has claimed.
+if [ "${AGMSG_PANE_PUSH:-1}" != "0" ] \
+   && declare -F agmsg_pane_registry_write >/dev/null 2>&1; then
+  while IFS=$'\t' read -r pane_team pane_agent; do
+    [ -n "$pane_team" ] || continue
+    [ -n "$pane_agent" ] || continue
+    case "$(actas_lock_state "$pane_team" "$pane_agent" "${SESSION_ID:-}")" in
+      other:*) continue ;;
+    esac
+    agmsg_pane_registry_write "$pane_team" "$pane_agent" "$TYPE" "$PROJECT" >/dev/null 2>&1 || true
+  done <<< "$PAIRS"
+fi
 
 # Check for unread messages and mark as read
 DB="$(agmsg_db_path)"

@@ -816,6 +816,35 @@ EOF
   [[ "$output" =~ "ping copilot" ]]
 }
 
+@test "check-inbox: refreshes this session's pane registration (turn-mode push)" {
+  bash "$SCRIPTS/join.sh" testteam alice codex "$TEST_PROJECT"
+  # Simulate the pane moving (restart / re-split): drop the registration join wrote.
+  bash "$SCRIPTS/pane.sh" unregister testteam alice >/dev/null 2>&1 || true
+  run bash "$SCRIPTS/pane.sh" lookup testteam alice
+  [ "$status" -ne 0 ]
+
+  bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
+  # Stop hook runs with a live pane backend in the session's env.
+  echo '{}' | env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
+    bash "$SCRIPTS/check-inbox.sh" codex "$TEST_PROJECT" >/dev/null
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam alice
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%9\t'"$TEST_PROJECT"$'\tcodex\t' ]
+}
+
+@test "check-inbox: AGMSG_PANE_PUSH=0 leaves pane unregistered" {
+  bash "$SCRIPTS/join.sh" testteam alice codex "$TEST_PROJECT"
+  bash "$SCRIPTS/pane.sh" unregister testteam alice >/dev/null 2>&1 || true
+  bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
+
+  echo '{}' | env AGMSG_PANE_PUSH=0 AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
+    bash "$SCRIPTS/check-inbox.sh" codex "$TEST_PROJECT" >/dev/null
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam alice
+  [ "$status" -ne 0 ]
+}
+
 @test "check-inbox (copilot): checks each team-agent pair for multi-team identities" {
   bash "$SCRIPTS/join.sh" team-a alice copilot "$TEST_PROJECT"
   bash "$SCRIPTS/join.sh" team-b bob copilot "$TEST_PROJECT"

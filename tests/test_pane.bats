@@ -110,6 +110,18 @@ _install_fake_wezterm() {
   [[ "$output" =~ "verdict: ok" ]]
 }
 
+@test "pane: doctor flags two members sharing one addr as a collision" {
+  # Two workers registered to the same cmux surface — the pane-push collision
+  # from BUG-spawn-shared-pane-collision. doctor must not report "ok".
+  AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 bash "$SCRIPTS/pane.sh" register my1pick scout codex /tmp/x >/dev/null
+  AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 bash "$SCRIPTS/pane.sh" register my1pick executor codex /tmp/x >/dev/null
+
+  run env AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:11 CMUX_SURFACE_ID=surface:11 bash "$SCRIPTS/pane.sh" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "COLLISION" ]]
+  [[ "$output" =~ "verdict: collision (duplicate pane addr:" ]]
+}
+
 @test "pane: doctor reports missing specific registry" {
   run env AGMSG_PANE_BACKEND=wezterm AGMSG_PANE_SELF=6 bash "$SCRIPTS/pane.sh" doctor opus48 executor
   [ "$status" -eq 0 ]
