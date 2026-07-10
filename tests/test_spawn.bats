@@ -31,6 +31,72 @@ EOF
   mkdir -p "$PROJ"
 }
 
+_install_fake_cmux_spawn() {
+  local parent="AAAAAAAA-0000-4000-8000-000000000000"
+  local workspace="CCCCCCCC-2222-4222-8222-222222222222"
+  cat > "$STUB_BIN/cmux" <<EOF
+#!/usr/bin/env bash
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in
+    --id-format) shift 2 ;;
+    *) break ;;
+  esac
+done
+cmd="\${1:-}"; [ "\$#" -gt 0 ] && shift
+case "\$cmd" in
+  new-split)
+    if grep -q "$parent" "\$TEST_SKILL_DIR"/run/pane.myteam.*.json 2>/dev/null; then
+      echo "pre-join wrote parent pane into child registry" >&2
+      exit 23
+    fi
+    counter="\$TEST_SKILL_DIR/run/fake-cmux-next"
+    n=0
+    [ ! -f "\$counter" ] || n="\$(cat "\$counter")"
+    n=\$((n + 1))
+    printf '%s\n' "\$n" > "\$counter"
+    case "\$n" in
+      1) printf 'OK surface:7 (BBBBBBBB-1111-4111-8111-111111111111) workspace:3 ($workspace)\n' ;;
+      *) printf 'OK surface:8 (DDDDDDDD-3333-4333-8333-333333333333) workspace:3 ($workspace)\n' ;;
+    esac
+    ;;
+  respawn-pane)
+    printf '%s\n' "\$*" >> "\$TEST_SKILL_DIR/run/fake-cmux-respawn-args"
+    exit 0
+    ;;
+  read-screen|send|send-key)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "$STUB_BIN/cmux"
+}
+
+_install_fake_tmux_spawn() {
+  cat > "$STUB_BIN/tmux" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  split-window)
+    counter="$TEST_SKILL_DIR/run/fake-tmux-next"
+    n=40
+    [ ! -f "$counter" ] || n="$(cat "$counter")"
+    n=$((n + 1))
+    printf '%s\n' "$n" > "$counter"
+    printf '%%%s\n' "$n"
+    ;;
+  select-pane|set-window-option)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "$STUB_BIN/tmux"
+}
+
 teardown() {
   teardown_test_env
 }
@@ -119,7 +185,7 @@ teardown() {
   local quoted="$TEST_SKILL_DIR/pro'j"
   mkdir -p "$quoted"
   bash "$SCRIPTS/join.sh" myteam existing claude-code "$quoted"
-  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$quoted"
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$quoted" --no-wait
   [[ "$output" != *"no team is registered"* ]]
   [[ "$output" != *"syntax error"* ]]
 }
@@ -487,6 +553,74 @@ YAML
   [[ "$output" == *"codex"* ]]
   [[ "$output" == *"actas"* ]]
   [[ "$output" == *"reviewer"* ]]
+}
+
+@test "spawn: consecutive cmux spawns synchronously register distinct child surfaces" {
+  local parent="AAAAAAAA-0000-4000-8000-000000000000"
+  local child_a="BBBBBBBB-1111-4111-8111-111111111111"
+  local child_b="DDDDDDDD-3333-4333-8333-333333333333"
+  _install_fake_cmux_spawn
+  mkdir -p "$TEST_SKILL_DIR/run"
+  AGMSG_PANE_BACKEND=none bash "$SCRIPTS/join.sh" myteam existing codex "$PROJ"
+
+  run env -u TMUX -u AGMSG_TERMINAL \
+    AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF="$parent" \
+    bash "$SCRIPTS/spawn.sh" codex reviewer-a --project "$PROJ"
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-a
+  [ "$status" -eq 0 ]
+  local first="$output"
+  [ "$first" = $'cmux\t'"$child_a"$'\t'"$PROJ"$'\tcodex\t' ]
+
+  # The child later refreshes its own registration during actas. The pinned
+  # AGMSG_PANE_SELF passed in the cmux boot command must preserve the exact
+  # UUID synchronously recorded by the parent.
+  run env AGMSG_AGENT_PID= AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF="$child_a" \
+    bash "$SCRIPTS/actas-claim.sh" "$PROJ" codex reviewer-a sid-reviewer-a
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-a
+  [ "$status" -eq 0 ]
+  [ "$output" = "$first" ]
+
+  run env -u TMUX -u AGMSG_TERMINAL \
+    AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF="$parent" \
+    bash "$SCRIPTS/spawn.sh" codex reviewer-b --project "$PROJ"
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-b
+  [ "$status" -eq 0 ]
+  local second="$output"
+  [ "$second" = $'cmux\t'"$child_b"$'\t'"$PROJ"$'\tcodex\t' ]
+  [ "$first" != "$second" ]
+
+  # The later child actas refresh reads this same pinned UUID, so it cannot
+  # overwrite the synchronous parent-side registration with another surface.
+  grep -F "AGMSG_PANE_SELF=$child_a" "$TEST_SKILL_DIR/run/fake-cmux-respawn-args"
+  grep -F "AGMSG_PANE_SELF=$child_b" "$TEST_SKILL_DIR/run/fake-cmux-respawn-args"
+}
+
+@test "spawn: consecutive tmux spawns synchronously register distinct child panes" {
+  _install_fake_tmux_spawn
+  mkdir -p "$TEST_SKILL_DIR/run"
+  AGMSG_PANE_BACKEND=none bash "$SCRIPTS/join.sh" myteam existing codex "$PROJ"
+
+  run env TMUX="/tmp/fake,1,0" AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%parent \
+    bash "$SCRIPTS/spawn.sh" codex reviewer-a --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-a
+  [ "$status" -eq 0 ]
+  local first="$output"
+  [ "$first" = $'tmux\t%41\t'"$PROJ"$'\tcodex\t' ]
+
+  run env TMUX="/tmp/fake,1,0" AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%parent \
+    bash "$SCRIPTS/spawn.sh" codex reviewer-b --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-b
+  [ "$status" -eq 0 ]
+  local second="$output"
+  [ "$second" = $'tmux\t%42\t'"$PROJ"$'\tcodex\t' ]
+  [ "$first" != "$second" ]
 }
 
 # --- pre-flight exclusivity check ---

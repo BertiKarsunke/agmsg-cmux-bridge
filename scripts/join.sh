@@ -144,6 +144,7 @@ agmsg_lock_release
 echo "Joined team $TEAM as $AGENT_ID"
 
 agmsg_join_register_pane() {
+  [ "${AGMSG_JOIN_REGISTER_PANE:-1}" != "0" ] || return 0
   declare -F agmsg_pane_registry_write >/dev/null 2>&1 || return 0
   declare -F agmsg_pane_registry_read >/dev/null 2>&1 || return 0
 

@@ -41,6 +41,20 @@ _install_fake_wezterm() {
   export PATH="$TEST_SKILL_DIR/bin:$PATH"
 }
 
+_install_fake_cmux() {
+  mkdir -p "$TEST_SKILL_DIR/bin"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'case "$1" in'
+    printf '%s\n' '  read-screen) exit 0 ;;'
+    printf '%s\n' '  send|send-key) printf '"'"'OK surface:6 workspace:3\n'"'"'; exit 0 ;;'
+    printf '%s\n' '  *) exit 0 ;;'
+    printf '%s\n' 'esac'
+  } > "$TEST_SKILL_DIR/bin/cmux"
+  chmod +x "$TEST_SKILL_DIR/bin/cmux"
+  export PATH="$TEST_SKILL_DIR/bin:$PATH"
+}
+
 # --- send.sh ---
 
 @test "send: delivers a message" {
@@ -90,6 +104,16 @@ _install_fake_wezterm() {
   run env AGMSG_PANE_COMMIT_DELAY=0 WEZTERM_EXPECT_SOCKET=/tmp/kaku.sock bash "$SCRIPTS/send.sh" testteam alice bob "hello wezterm pane"
   [ "$status" -eq 0 ]
   [[ "$output" =~ "pane-push: nudged bob (wezterm 6)" ]]
+}
+
+@test "send: suppresses cmux command stdout while nudging" {
+  _install_fake_cmux
+  AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF=surface:6 bash "$SCRIPTS/pane.sh" register testteam bob claude-code /tmp/project-b >/dev/null
+
+  run env AGMSG_PANE_COMMIT_DELAY=0 bash "$SCRIPTS/send.sh" testteam alice bob "hello cmux pane"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "pane-push: nudged bob (cmux surface:6)" ]]
+  [[ "$output" != *"OK surface:"* ]]
 }
 
 @test "send: fails without required args" {

@@ -302,7 +302,7 @@ esac
 # PROJECT here is the explicit spawn target (--project / $PWD), which may not be
 # registered yet. Opt out of #92 pwd-resolution so join.sh registers exactly
 # this path rather than rewriting it to the spawning session's own project.
-AGMSG_RESOLVE_PROJECT=0 "$SCRIPT_DIR/join.sh" "$TEAM" "$NAME" "$AGENT_TYPE" "$PROJECT" >/dev/null
+AGMSG_RESOLVE_PROJECT=0 AGMSG_JOIN_REGISTER_PANE=0 "$SCRIPT_DIR/join.sh" "$TEAM" "$NAME" "$AGENT_TYPE" "$PROJECT" >/dev/null
 
 # --- Build the boot script the new agent will run ---
 # Rather than embed a multiply-escaped command string into each platform's
@@ -393,8 +393,30 @@ chmod +x "$BOOT"
 
 record_spawn_placement() {
   local target_id="${1:?Usage: record_spawn_placement TARGET_ID}"
+  local path
+  path="$(agmsg_spawn_path "$TEAM" "$NAME")"
+  mkdir -p "$(dirname "$path")" 2>/dev/null || true
   printf '%s\t%s\t%s\n' "$target_id" "$PROJECT" "$AGENT_TYPE" \
-    > "$(agmsg_spawn_path "$TEAM" "$NAME")" 2>/dev/null || true
+    > "$path" 2>/dev/null || true
+}
+
+record_spawn_pane_registry() {
+  local backend="${1:?Usage: record_spawn_pane_registry BACKEND ADDR [SOCKET]}"
+  local addr="${2:?Missing pane address}"
+  local socket="${3:-}"
+  local -a env_args
+
+  env_args=(AGMSG_PANE_BACKEND="$backend" AGMSG_PANE_SELF="$addr")
+  case "$backend" in
+    wezterm)
+      if [ -n "$socket" ]; then
+        env_args+=(WEZTERM_UNIX_SOCKET="$socket")
+      fi
+      ;;
+  esac
+
+  env "${env_args[@]}" bash "$SCRIPT_DIR/pane.sh" register "$TEAM" "$NAME" "$AGENT_TYPE" "$PROJECT" >/dev/null \
+    || die "failed to record pane registry for '$TEAM/$NAME' ($backend $addr)"
 }
 
 cmux_ref_from_output() {
@@ -422,19 +444,25 @@ launch_in_tmux() {
   # the boot script's filename (boot-XXXXXX). `automatic-rename off` keeps the
   # name from being clobbered once the boot script runs the CLI / drops to a
   # shell.
-  local target_id
+  local target_id target_pane
   if [ "$TMUX_TARGET" = "window" ]; then
-    target_id="$(tmux new-window -P -F '#{window_id}' -n "$NAME" -c "$PROJECT" "$BOOT")"
+    local window_out
+    window_out="$(tmux new-window -P -F '#{window_id}	#{pane_id}' -n "$NAME" -c "$PROJECT" "$BOOT")"
+    IFS=$'\t' read -r target_id target_pane <<< "$window_out"
+    [ -n "$target_id" ] || die "tmux new-window did not return a window id"
+    [ -n "$target_pane" ] || die "tmux new-window did not return a pane id"
     tmux set-window-option -t "$target_id" automatic-rename off 2>/dev/null || true
   else
     local dir="-h"; [ "$SPLIT" = "v" ] && dir="-v"
     target_id="$(tmux split-window "$dir" -P -F '#{pane_id}' -c "$PROJECT" "$BOOT")"
+    target_pane="$target_id"
     tmux select-pane -t "$target_id" -T "$NAME" 2>/dev/null || true
   fi
   # Record placement so `despawn --force` can tear this member down even if its
   # watcher later can't respond to ctrl:despawn. tmux ids are self-describing:
   # %N = pane (kill-pane), @N = window (kill-window). See #109.
   record_spawn_placement "tmux:$target_id"
+  record_spawn_pane_registry tmux "$target_pane"
 }
 
 launch_in_cmux() {
@@ -494,6 +522,7 @@ launch_in_cmux() {
     || die "cmux respawn-pane failed for $surface_ref"
   # Record placement by UUID (stable) when we have it; short refs can shift.
   record_spawn_placement "cmux:${surface_uuid:-$surface_ref}"
+  record_spawn_pane_registry cmux "${surface_uuid:-$surface_ref}"
 }
 
 launch_in_wezterm() {
@@ -516,6 +545,7 @@ launch_in_wezterm() {
   pane_id="$(printf '%s\n' "$pane_id" | sed '/^[[:space:]]*$/d' | tail -n 1)"
   [ -n "$pane_id" ] || die "wezterm split-pane did not return a pane id"
   record_spawn_placement "wezterm:$pane_id"
+  record_spawn_pane_registry wezterm "$pane_id" "$socket"
 }
 
 launch_macos_terminal() {

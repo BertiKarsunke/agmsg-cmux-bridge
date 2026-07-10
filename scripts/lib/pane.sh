@@ -162,11 +162,11 @@ agmsg_pane_inject() {
       tmux send-keys -t "$addr" Enter
       ;;
     cmux)
-      cmux send --surface "$addr" -- "$text" || return 1
+      cmux send --surface "$addr" -- "$text" >/dev/null || return 1
       sleep "$delay"
-      cmux send-key --surface "$addr" -- Enter || return 1
+      cmux send-key --surface "$addr" -- Enter >/dev/null || return 1
       sleep "$delay"
-      cmux send-key --surface "$addr" -- Enter
+      cmux send-key --surface "$addr" -- Enter >/dev/null
       ;;
     wezterm)
       agmsg_pane_wezterm "$socket" cli send-text --pane-id "$addr" --no-paste -- "$text" || return 1
@@ -250,15 +250,16 @@ agmsg_pane_registry_json() {
   local owner="${7:-}"
 
   if command -v sqlite3 >/dev/null 2>&1; then
+    local backend_q addr_q project_q type_q registered_at_q socket_q owner_q
+    backend_q="$(agmsg_pane_sql_quote "$backend")"
+    addr_q="$(agmsg_pane_sql_quote "$addr")"
+    project_q="$(agmsg_pane_sql_quote "$project")"
+    type_q="$(agmsg_pane_sql_quote "$type")"
+    registered_at_q="$(agmsg_pane_sql_quote "$registered_at")"
+    socket_q="$(agmsg_pane_sql_quote "$socket")"
+    owner_q="$(agmsg_pane_sql_quote "$owner")"
     sqlite3 :memory: \
-      ".param set :backend '$(agmsg_pane_sql_quote "$backend")'" \
-      ".param set :addr '$(agmsg_pane_sql_quote "$addr")'" \
-      ".param set :project '$(agmsg_pane_sql_quote "$project")'" \
-      ".param set :type '$(agmsg_pane_sql_quote "$type")'" \
-      ".param set :registered_at '$(agmsg_pane_sql_quote "$registered_at")'" \
-      ".param set :socket '$(agmsg_pane_sql_quote "$socket")'" \
-      ".param set :owner '$(agmsg_pane_sql_quote "$owner")'" \
-      "SELECT json_object('backend', :backend, 'addr', :addr, 'project', :project, 'type', :type, 'registered_at', :registered_at, 'socket', :socket, 'owner', :owner);" | tr -d '\r'
+      "SELECT json_object('backend', '$backend_q', 'addr', '$addr_q', 'project', '$project_q', 'type', '$type_q', 'registered_at', '$registered_at_q', 'socket', '$socket_q', 'owner', '$owner_q');" | tr -d '\r'
     return 0
   fi
 
