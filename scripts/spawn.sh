@@ -429,6 +429,12 @@ cmux_uuid_from_output() {
   grep -Eo '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' | head -n 1
 }
 
+herdr_pane_id_from_output() {
+  # herdr pane split returns JSON with the created pane under result.pane.
+  # Parse the explicit pane_id field; never infer a pane from list ordering.
+  grep -Eo '"pane_id"[[:space:]]*:[[:space:]]*"[^"]+"' | tail -n 1 | sed -E 's/.*"pane_id"[[:space:]]*:[[:space:]]*"([^"]+)"/\1/'
+}
+
 launch_in_tmux() {
   # $TMUX is set (we are inside a tmux pane), but the `tmux` client binary
   # still has to be on PATH for split-window/new-window to work. In a
@@ -474,22 +480,28 @@ launch_in_cmux() {
     || die "cmux backend detected but no current cmux surface could be identified"
   direction="right"; [ "$SPLIT" = "v" ] && direction="down"
 
-  local -a workspace_args=()
-  if [ -n "${CMUX_WORKSPACE_ID:-}" ]; then
-    workspace_args=(--workspace "$CMUX_WORKSPACE_ID")
-  fi
-
   # `--id-format both` so we capture the surface UUID alongside the short ref.
-  split_out="$(cmux --id-format both new-split "$direction" --surface "$from" "${workspace_args[@]}" --focus false | tr -d '\r')" \
-    || die "cmux split failed"
+  local workspace_id="${CMUX_WORKSPACE_ID:-}"
+  if [ -n "$workspace_id" ]; then
+    split_out="$(cmux --id-format both new-split "$direction" --surface "$from" --workspace "$workspace_id" --focus false | tr -d '\r')" \
+      || die "cmux split failed"
+  else
+    split_out="$(cmux --id-format both new-split "$direction" --surface "$from" --focus false | tr -d '\r')" \
+      || die "cmux split failed"
+  fi
   split_ref="$(printf '%s\n' "$split_out" | cmux_ref_from_output)"
   [ -n "$split_ref" ] || die "cmux split did not return a pane or surface ref"
 
   case "$split_ref" in
     pane:*)
       local surface_out
-      surface_out="$(cmux --id-format both new-surface --type terminal --pane "$split_ref" "${workspace_args[@]}" --working-directory "$PROJECT" --focus true | tr -d '\r')" \
-        || die "cmux terminal surface creation failed"
+      if [ -n "$workspace_id" ]; then
+        surface_out="$(cmux --id-format both new-surface --type terminal --pane "$split_ref" --workspace "$workspace_id" --working-directory "$PROJECT" --focus true | tr -d '\r')" \
+          || die "cmux terminal surface creation failed"
+      else
+        surface_out="$(cmux --id-format both new-surface --type terminal --pane "$split_ref" --working-directory "$PROJECT" --focus true | tr -d '\r')" \
+          || die "cmux terminal surface creation failed"
+      fi
       surface_ref="$(printf '%s\n' "$surface_out" | cmux_ref_from_output)"
       surface_uuid="$(printf '%s\n' "$surface_out" | cmux_uuid_from_output)"
       ;;
@@ -518,8 +530,13 @@ launch_in_cmux() {
     boot_cmd="export AGMSG_PANE_SELF=$surface_uuid CMUX_SURFACE_ID=$surface_uuid; exec $BOOT"
   fi
 
-  cmux respawn-pane --surface "$surface_ref" "${workspace_args[@]}" --command "$boot_cmd" >/dev/null \
-    || die "cmux respawn-pane failed for $surface_ref"
+  if [ -n "$workspace_id" ]; then
+    cmux respawn-pane --surface "$surface_ref" --workspace "$workspace_id" --command "$boot_cmd" >/dev/null \
+      || die "cmux respawn-pane failed for $surface_ref"
+  else
+    cmux respawn-pane --surface "$surface_ref" --command "$boot_cmd" >/dev/null \
+      || die "cmux respawn-pane failed for $surface_ref"
+  fi
   # Record placement by UUID (stable) when we have it; short refs can shift.
   record_spawn_placement "cmux:${surface_uuid:-$surface_ref}"
   record_spawn_pane_registry cmux "${surface_uuid:-$surface_ref}"
@@ -546,6 +563,40 @@ launch_in_wezterm() {
   [ -n "$pane_id" ] || die "wezterm split-pane did not return a pane id"
   record_spawn_placement "wezterm:$pane_id"
   record_spawn_pane_registry wezterm "$pane_id" "$socket"
+}
+
+launch_in_herdr() {
+  command -v herdr >/dev/null 2>&1 \
+    || die "herdr backend detected but the herdr binary is not on PATH"
+
+  local from direction split_out pane_id socket boot_cmd q_pane q_boot
+  from="$(agmsg_pane_self herdr 2>/dev/null)" \
+    || die "herdr backend detected but no current herdr pane could be identified"
+  socket="$(agmsg_pane_socket herdr)"
+  direction="right"; [ "$SPLIT" = "v" ] && direction="down"
+
+  if [ -n "$socket" ]; then
+    split_out="$(HERDR_SOCKET_PATH="$socket" herdr pane split "$from" --direction "$direction" --cwd "$PROJECT" --no-focus | tr -d '\r')" \
+      || die "herdr pane split failed"
+  else
+    split_out="$(herdr pane split "$from" --direction "$direction" --cwd "$PROJECT" --no-focus | tr -d '\r')" \
+      || die "herdr pane split failed"
+  fi
+  pane_id="$(printf '%s\n' "$split_out" | herdr_pane_id_from_output)"
+  [ -n "$pane_id" ] || die "herdr pane split did not return a pane id"
+
+  printf -v q_pane '%q' "$pane_id"
+  printf -v q_boot '%q' "$BOOT"
+  boot_cmd="export AGMSG_PANE_SELF=$q_pane AGMSG_PANE_BACKEND=herdr; exec $q_boot"
+  if [ -n "$socket" ]; then
+    HERDR_SOCKET_PATH="$socket" herdr pane run "$pane_id" "$boot_cmd" >/dev/null \
+      || die "herdr pane run failed for $pane_id"
+  else
+    herdr pane run "$pane_id" "$boot_cmd" >/dev/null \
+      || die "herdr pane run failed for $pane_id"
+  fi
+  record_spawn_placement "herdr:$pane_id"
+  record_spawn_pane_registry herdr "$pane_id" "$socket"
 }
 
 launch_macos_terminal() {
@@ -623,6 +674,11 @@ place_and_launch() {
     wezterm)
       launch_in_wezterm
       echo "spawned ${AGENT_TYPE} '${NAME}' in wezterm split"
+      return 0
+      ;;
+    herdr)
+      launch_in_herdr
+      echo "spawned ${AGENT_TYPE} '${NAME}' in herdr split"
       return 0
       ;;
   esac

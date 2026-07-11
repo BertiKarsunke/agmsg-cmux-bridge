@@ -55,6 +55,18 @@ _install_fake_cmux() {
   export PATH="$TEST_SKILL_DIR/bin:$PATH"
 }
 
+_install_fake_herdr() {
+  mkdir -p "$TEST_SKILL_DIR/bin"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'if [ "$1" = pane ] && [ "$2" = get ]; then [ "$3" = w1:p1 ] && exit 0 || exit 1; fi'
+    printf '%s\n' 'if [ "$1" = pane ] && { [ "$2" = send-text ] || [ "$2" = send-keys ]; }; then exit 0; fi'
+    printf '%s\n' 'exit 0'
+  } > "$TEST_SKILL_DIR/bin/herdr"
+  chmod +x "$TEST_SKILL_DIR/bin/herdr"
+  export PATH="$TEST_SKILL_DIR/bin:$PATH"
+}
+
 # --- send.sh ---
 
 @test "send: delivers a message" {
@@ -114,6 +126,16 @@ _install_fake_cmux() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "pane-push: nudged bob (cmux surface:6)" ]]
   [[ "$output" != *"OK surface:"* ]]
+}
+
+@test "send: nudges registered herdr pane with stored socket" {
+  _install_fake_herdr
+  AGMSG_PANE_BACKEND=herdr AGMSG_PANE_SELF=w1:p1 HERDR_SOCKET_PATH=/tmp/herdr.sock \
+    bash "$SCRIPTS/pane.sh" register testteam bob claude-code /tmp/project-b >/dev/null
+
+  run env AGMSG_PANE_COMMIT_DELAY=0 HERDR_SOCKET_PATH=/tmp/herdr.sock bash "$SCRIPTS/send.sh" testteam alice bob "hello herdr pane"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "pane-push: nudged bob (herdr w1:p1)" ]]
 }
 
 @test "send: fails without required args" {

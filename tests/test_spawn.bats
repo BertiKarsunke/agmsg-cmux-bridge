@@ -97,6 +97,30 @@ EOF
   chmod +x "$STUB_BIN/tmux"
 }
 
+_install_fake_herdr_spawn() {
+  cat > "$STUB_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = pane ] && [ "$2" = split ]; then
+  counter="$TEST_SKILL_DIR/run/fake-herdr-next"
+  n=0
+  [ ! -f "$counter" ] || n="$(cat "$counter")"
+  n=$((n + 1))
+  printf '%s\n' "$n" > "$counter"
+  printf '{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p%s"},"type":"pane_info"}}\n' "$((n + 1))"
+  exit 0
+fi
+if [ "$1" = pane ] && [ "$2" = run ]; then
+  printf '%s\n' "$*" >> "$TEST_SKILL_DIR/run/fake-herdr-run"
+  exit 0
+fi
+if [ "$1" = pane ] && [ "$2" = get ]; then
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$STUB_BIN/herdr"
+}
+
 teardown() {
   teardown_test_env
 }
@@ -621,6 +645,31 @@ YAML
   local second="$output"
   [ "$second" = $'tmux\t%42\t'"$PROJ"$'\tcodex\t' ]
   [ "$first" != "$second" ]
+}
+
+@test "spawn: consecutive herdr spawns synchronously register distinct child panes" {
+  _install_fake_herdr_spawn
+  mkdir -p "$TEST_SKILL_DIR/run"
+  AGMSG_PANE_BACKEND=none bash "$SCRIPTS/join.sh" myteam existing codex "$PROJ"
+
+  run env -u TMUX -u AGMSG_TERMINAL AGMSG_PANE_BACKEND=herdr AGMSG_PANE_SELF=w1:p1 HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/tmp/herdr.sock \
+    bash "$SCRIPTS/spawn.sh" codex reviewer-a --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-a
+  [ "$status" -eq 0 ]
+  local first="$output"
+  [ "$first" = $'herdr\tw1:p2\t'"$PROJ"$'\tcodex\t/tmp/herdr.sock' ]
+
+  run env -u TMUX -u AGMSG_TERMINAL AGMSG_PANE_BACKEND=herdr AGMSG_PANE_SELF=w1:p1 HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/tmp/herdr.sock \
+    bash "$SCRIPTS/spawn.sh" codex reviewer-b --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPTS/pane.sh" lookup myteam reviewer-b
+  [ "$status" -eq 0 ]
+  local second="$output"
+  [ "$second" = $'herdr\tw1:p3\t'"$PROJ"$'\tcodex\t/tmp/herdr.sock' ]
+  [ "$first" != "$second" ]
+  grep -F 'AGMSG_PANE_SELF=w1:p2' "$TEST_SKILL_DIR/run/fake-herdr-run"
+  grep -F 'AGMSG_PANE_SELF=w1:p3' "$TEST_SKILL_DIR/run/fake-herdr-run"
 }
 
 # --- pre-flight exclusivity check ---

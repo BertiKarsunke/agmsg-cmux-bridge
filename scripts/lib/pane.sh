@@ -63,6 +63,11 @@ agmsg_pane_backend() {
     return 0
   fi
 
+  if [ "${HERDR_ENV:-}" = "1" ] && [ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null 2>&1; then
+    printf 'herdr\n'
+    return 0
+  fi
+
   if command -v cmux >/dev/null 2>&1 && agmsg_pane_cmux_has_context; then
     printf 'cmux\n'
     return 0
@@ -91,6 +96,10 @@ agmsg_pane_self() {
     tmux)
       [ -n "${TMUX_PANE:-}" ] || return 1
       printf '%s\n' "$TMUX_PANE"
+      ;;
+    herdr)
+      [ -n "${HERDR_PANE_ID:-}" ] || return 1
+      printf '%s\n' "$HERDR_PANE_ID"
       ;;
     cmux)
       # Prefer the surface UUID: it is globally unique and stable, whereas cmux
@@ -125,6 +134,9 @@ agmsg_pane_self() {
 agmsg_pane_socket() {
   local backend="${1:-}"
   case "$backend" in
+    herdr)
+      printf '%s\n' "${HERDR_SOCKET_PATH:-}"
+      ;;
     wezterm)
       printf '%s\n' "${WEZTERM_UNIX_SOCKET:-${KAKU_UNIX_SOCKET:-}}"
       ;;
@@ -161,6 +173,13 @@ agmsg_pane_inject() {
       sleep "$delay"
       tmux send-keys -t "$addr" Enter
       ;;
+    herdr)
+      agmsg_pane_herdr "$socket" pane send-text "$addr" "$text" >/dev/null || return 1
+      sleep "$delay"
+      agmsg_pane_herdr "$socket" pane send-keys "$addr" enter >/dev/null || return 1
+      sleep "$delay"
+      agmsg_pane_herdr "$socket" pane send-keys "$addr" enter >/dev/null
+      ;;
     cmux)
       cmux send --surface "$addr" -- "$text" >/dev/null || return 1
       sleep "$delay"
@@ -192,6 +211,16 @@ agmsg_pane_wezterm() {
   fi
 }
 
+agmsg_pane_herdr() {
+  local socket="$1"
+  shift
+  if [ -n "$socket" ]; then
+    HERDR_SOCKET_PATH="$socket" herdr "$@"
+  else
+    herdr "$@"
+  fi
+}
+
 agmsg_pane_alive() {
   local backend="${1:?Usage: agmsg_pane_alive BACKEND ADDR}"
   local addr="${2:?Missing pane address}"
@@ -201,6 +230,10 @@ agmsg_pane_alive() {
     tmux)
       command -v tmux >/dev/null 2>&1 || return 1
       tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -Fx -- "$addr" >/dev/null
+      ;;
+    herdr)
+      command -v herdr >/dev/null 2>&1 || return 1
+      agmsg_pane_herdr "$socket" pane get "$addr" >/dev/null 2>&1
       ;;
     cmux)
       command -v cmux >/dev/null 2>&1 || return 1

@@ -36,6 +36,18 @@ _install_fake_wezterm() {
   export PATH="$TEST_SKILL_DIR/bin:$PATH"
 }
 
+_install_fake_herdr() {
+  mkdir -p "$TEST_SKILL_DIR/bin"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'if [ "$1" = pane ] && [ "$2" = get ]; then [ "$3" = w1:p1 ] && exit 0 || exit 1; fi'
+    printf '%s\n' 'if [ "$1" = pane ] && { [ "$2" = send-text ] || [ "$2" = send-keys ]; }; then exit 0; fi'
+    printf '%s\n' 'exit 0'
+  } > "$TEST_SKILL_DIR/bin/herdr"
+  chmod +x "$TEST_SKILL_DIR/bin/herdr"
+  export PATH="$TEST_SKILL_DIR/bin:$PATH"
+}
+
 @test "pane: registry_path uses run file under skill dir" {
   run bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_path opus48 executor' _ "$SCRIPTS"
   [ "$status" -eq 0 ]
@@ -73,6 +85,15 @@ _install_fake_wezterm() {
   run env AGMSG_PANE_BACKEND=wezterm AGMSG_PANE_SELF=6 KAKU_UNIX_SOCKET=/tmp/kaku.sock bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_write opus48 executor codex /tmp/x; agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
   [ "$status" -eq 0 ]
   [ "$output" = $'wezterm\t6\t/tmp/x\tcodex\t/tmp/kaku.sock' ]
+}
+
+@test "pane: herdr backend detects self, stores socket, and checks liveness" {
+  _install_fake_herdr
+  run env HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/tmp/herdr.sock \
+    bash -c 'source "$1/lib/pane.sh"; printf "%s\n" "$(agmsg_pane_backend)" "$(agmsg_pane_self herdr)"; agmsg_pane_registry_write opus48 executor codex /tmp/x; agmsg_pane_registry_read opus48 executor; agmsg_pane_alive herdr w1:p1 "$(agmsg_pane_socket herdr)"' _ "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'herdr\nw1:p1'* ]]
+  [[ "$output" == *$'herdr\tw1:p1\t/tmp/x\tcodex\t/tmp/herdr.sock'* ]]
 }
 
 @test "pane: cli lookup prints machine-readable registration" {
@@ -187,7 +208,7 @@ _install_fake_wezterm() {
   [[ "$output" =~ "self addr: (none)" ]]
   [[ "$output" =~ "env hints: (none)" ]]
   [[ "$output" =~ "registry: none" ]]
-  [[ "$output" =~ "verdict: no tmux/cmux pane backend detected" ]]
+  [[ "$output" =~ "verdict: no pane backend detected" ]]
 }
 
 @test "pane: doctor reports injected backend self and env hints without cmux" {

@@ -97,6 +97,16 @@ kill_wezterm_placement() {
   fi
 }
 
+kill_herdr_placement() {
+  local target="$1" socket="${HERDR_SOCKET_PATH:-}"
+  command -v herdr >/dev/null 2>&1 || return 0
+  if [ -n "$socket" ]; then
+    HERDR_SOCKET_PATH="$socket" herdr pane close "$target" >/dev/null 2>&1 || true
+  else
+    herdr pane close "$target" >/dev/null 2>&1 || true
+  fi
+}
+
 kill_recorded_placement() {
   [ -f "$SPAWN_REC" ] || return 1
   local id _proj _type
@@ -109,6 +119,7 @@ kill_recorded_placement() {
     tmux) kill_tmux_placement "$target" ;;
     cmux) kill_cmux_placement "$target" ;;
     wezterm) kill_wezterm_placement "$target" ;;
+    herdr) kill_herdr_placement "$target" ;;
     *) echo "despawn: unsupported placement backend '$backend' for '$id'; dropping registration only" >&2 ;;
   esac
   printf '%s\t%s\t%s' "$id" "$_proj" "$_type"   # echo back for the caller

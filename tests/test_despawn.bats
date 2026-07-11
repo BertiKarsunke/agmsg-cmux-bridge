@@ -17,6 +17,19 @@ teardown() {
   teardown_test_env
 }
 
+_install_fake_herdr() {
+  mkdir -p "$TEST_SKILL_DIR/bin"
+  cat > "$TEST_SKILL_DIR/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = pane ] && [ "$2" = close ]; then
+  printf '%s\n' "$*" >> "$TEST_SKILL_DIR/run/fake-herdr-close"
+fi
+exit 0
+EOF
+  chmod +x "$TEST_SKILL_DIR/bin/herdr"
+  export PATH="$TEST_SKILL_DIR/bin:$PATH"
+}
+
 @test "despawn: graceful — ctrl:despawn makes the member drop its role" {
   bash "$SCRIPTS/join.sh" team alice claude-code "$PROJ" >/dev/null
   # Make the member session look alive so the leader sees a live lock to wait on.
@@ -60,6 +73,19 @@ teardown() {
   [ ! -f "$RUN/actas.team__alice.session" ]         # lock released
   run bash "$SCRIPTS/identities.sh" "$PROJ" claude-code
   [[ "$output" != *alice* ]]                        # registration dropped
+}
+
+@test "despawn --force: closes recorded herdr pane" {
+  _install_fake_herdr
+  bash "$SCRIPTS/join.sh" team alice codex "$PROJ" >/dev/null
+  printf '%s\t%s\t%s\n' 'herdr:w1:p9' "$PROJ" codex > "$RUN/spawn.team__alice"
+  printf 'somesid\n' > "$RUN/actas.team__alice.session"
+
+  run env HERDR_SOCKET_PATH=/tmp/herdr.sock bash "$SCRIPTS/despawn.sh" team leader alice --force
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=forced"* ]]
+  grep -F 'pane close w1:p9' "$RUN/fake-herdr-close"
+  [ ! -f "$RUN/spawn.team__alice" ]
 }
 
 @test "despawn --force: errors when there is no placement record" {

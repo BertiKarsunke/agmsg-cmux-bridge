@@ -259,6 +259,16 @@ agmsg_watch_self_close() {
       [ -n "$target" ] && command -v tmux >/dev/null 2>&1 || return 1
       tmux kill-pane -t "$target" 2>/dev/null
       ;;
+    herdr)
+      target="$(agmsg_pane_self herdr 2>/dev/null || true)"
+      [ -n "$target" ] && command -v herdr >/dev/null 2>&1 || return 1
+      socket="$(agmsg_pane_socket herdr)"
+      if [ -n "$socket" ]; then
+        HERDR_SOCKET_PATH="$socket" herdr pane close "$target" >/dev/null 2>&1
+      else
+        herdr pane close "$target" >/dev/null 2>&1
+      fi
+      ;;
     cmux)
       target="$(agmsg_pane_self cmux 2>/dev/null || true)"
       [ -n "$target" ] && command -v cmux >/dev/null 2>&1 || return 1

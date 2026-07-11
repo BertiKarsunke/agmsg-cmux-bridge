@@ -153,7 +153,7 @@ cmd_doctor_header() {
   echo "self addr: $self"
 
   env_parts=""
-  local -a env_keys=(TMUX TMUX_PANE CMUX_SURFACE_ID WEZTERM_PANE WEZTERM_UNIX_SOCKET KAKU_UNIX_SOCKET)
+  local -a env_keys=(TMUX TMUX_PANE HERDR_ENV HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_SOCKET_PATH CMUX_SURFACE_ID WEZTERM_PANE WEZTERM_UNIX_SOCKET KAKU_UNIX_SOCKET)
   for env_key in "${env_keys[@]}"; do
     if [ -n "${!env_key+x}" ]; then
       env_parts="${env_parts:+$env_parts }$env_key=${!env_key}"
@@ -300,7 +300,7 @@ cmd_doctor() {
   fi
 
   if [ "$backend" = "none" ]; then
-    echo "verdict: no tmux/cmux pane backend detected"
+    echo "verdict: no pane backend detected (supported: tmux/cmux/wezterm/herdr)"
   elif [ "${DOCTOR_REGISTRY_STATE:-ok}" = "missing" ]; then
     echo "verdict: no pane registered"
   elif [ -n "${DOCTOR_COLLISION:-}" ]; then
