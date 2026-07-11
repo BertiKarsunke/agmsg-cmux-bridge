@@ -12,6 +12,15 @@ setup_test_env() {
   unset AGMSG_CODEX_SHIM_SCRIPT_DIR
   unset AGMSG_CODEX_SHIM_TARGET
   unset AGMSG_PANE_OWNER
+  # Prevent the host terminal (tmux/cmux/wezterm/herdr) from leaking into
+  # tests. Tests that exercise a pane backend set their hints explicitly.
+  unset AGMSG_PANE_BACKEND AGMSG_PANE_SELF
+  unset CMUX_SURFACE_ID CMUX_WORKSPACE_ID CMUX_TAB_ID CMUX_PANEL_ID
+  unset CMUX_SOCKET CMUX_SOCKET_PATH
+  unset WEZTERM_PANE WEZTERM_UNIX_SOCKET KAKU_UNIX_SOCKET
+  unset HERDR_ENV HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_TAB_ID
+  unset HERDR_SOCKET_PATH HERDR_CLIENT_SOCKET_PATH HERDR_SESSION HERDR_BIN_PATH
+  unset TMUX TMUX_PANE
 
   export TEST_SKILL_DIR="$(mktemp -d)"
   mkdir -p "$TEST_SKILL_DIR"/{scripts,db,teams}
