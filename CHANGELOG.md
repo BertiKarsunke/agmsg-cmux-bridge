@@ -4,31 +4,67 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.6] - 2026-07-05
 
 ### Added
-- `leave.sh <team> all` removes every agent in the team and deletes it; `reset.sh <project> <type> all` clears every agent registered to that project/type (other projects/types untouched).
-- `AGMSG_LEAVE_ON_EXIT=1` opt-in: the SessionEnd hook clears this project/type's registration on a graceful session exit (off by default — registrations otherwise persist across restarts). No-ops on multi-identity projects and does not fire on hard kills/crashes (liveness GC remains the backstop).
-- `team.sh` now tags each member `[live]`/`[stale]` from its pane marker (untagged when there's no marker or the pane is on another host). `AGMSG_GC_ON_LIST=1` makes listing also remove the `[stale]` members — the backstop for hard kills `AGMSG_LEAVE_ON_EXIT` can't catch. Listing stays read-only unless the flag is set.
-- `pane.sh doctor` detects pane-push collisions: two `(team, agent)` pairs registered to the same backend+addr now report `COLLISION`/`verdict: collision` instead of `ok`.
+- Aligned-grid seam-segment dragging + lazy transpose (issue #317, part 3) (#327)
+- Wire pane split tree into rendering + drag-drop (issue #317, part 2) (#324)
+- Pane split tree — pure data model + tests (issue #317, part 1) (#321)
+- Expose pane layout in the View menu (#316)
 
 ### Fixed
-- cmux spawn no longer registers two workers to the same surface. `spawn.sh` pins each spawned worker's identity to the surface it created via `AGMSG_PANE_SELF` (an agmsg-only override cmux never touches, so it survives into the worker's `actas` subprocess), and pane registrations key on the stable surface UUID rather than the positional `surface:N` short ref. Exporting `CMUX_SURFACE_ID` alone was insufficient — cmux re-injects a focus/session-dependent value into the worker's `actas` subprocess, so both workers read the same id and self-registered the same addr, making pane-push always nudge one pane (BUG-spawn-shared-pane-collision).
+- Correct boot script for Windows-tmux launch and per-type prefix (#282, #283) (#329)
+- Strip inherited same-type session-identity env vars (#294) (#326)
+- Match project registrations across Windows path forms (#268) (#328)
+- Launch agents via cmd.exe on Windows so PATHEXT/aliases resolve (#314, #313) (#325)
+- Resolve MSYS project paths to native on Windows spawn (#315) (#319)
+- Normalize Windows drive-letter project path to POSIX before identity resolution (#275)
 
-## [1.3.0] - 2026-06-25
+## [app-v0.1.3] - 2026-07-04
+
+### Fixed
+- Explicit PATH propagation to spawned processes, dscl shell fallback, diagnostic log (#312)
+- V0.1.3 — import login shell PATH so agent spawn works from Finder (#311)
+
+## [app-v0.1.2] - 2026-07-04
+
+### Fixed
+- Suppress bash's console window and profile-loading delay (#310)
+- Fall back to USERPROFILE when HOME is unset (#309)
+- Resolve Git Bash explicitly + bump version to 0.1.2 (#308)
+- V0.1.2 — Windows bash path bug, banner overlap, update feedback (#306)
+
+## [app-v0.1.1] - 2026-07-04
 
 ### Added
-- Join announcements: when a new member or role joins (a fresh join, or an `actas` that creates a new role; both route through `join.sh`), the team leader (`AGMSG_TEAM_LEADER`, default `planner`) gets a `[JOIN]` inbox notice. Disable with `AGMSG_ANNOUNCE_JOIN=0`.
-- Upstream agmsg v1.1.1-v1.1.3 changes are merged into this fork, including `spawn --boot-prompt`, `spawn --model`, spawn-options YAML, the grok-build agent type, the Astro/Tailwind site, logo assets, monitor robustness fixes, Windows/MSYS2 compatibility fixes, registry locking, and SQL/path escaping fixes.
+- Add update-cask.sh — automate the Homebrew tap bump (#304)
 
 ### Fixed
-- Multi-team turn-mode delivery: `check-inbox.sh` now polls every `(team, agent)` pair for the project (via `identities.sh`, the same source `watch.sh` uses) instead of one agent name across all teams. An agent joined under different names per team no longer misses messages; the header shows `(as <agent>)` when a project has more than one identity.
-- Preserved the fork's pane-push contracts while merging upstream: `spawn.sh` still supports cmux/wezterm placement and `backend:id` spawn records, `watch.sh` still self-registers panes, and `send.sh` still treats pane push as best-effort on top of inbox delivery.
+- V0.1.1 — agmsg-app pin fix, updater artifacts, outdated-CLI warning (#303)
 
-## [1.2.0] - 2026-06-25
+### Documentation
+- Add brew trust step to macOS install instructions (#301)
+
+## [app-v0.1.0] - 2026-07-03
+
+### Added
+- Official agmsg desktop app (#298)
+
+## [1.1.4] - 2026-07-03
+
+### Added
+- Add scripts/api.sh — read-only JSON entry point for non-bash consumers (#289)
+- Enable spawn for antigravity, copilot, cursor, gemini, opencode (#278)
+- Per-type spawn options via a configurable YAML file (#274)
 
 ### Fixed
-- Turn-mode agents (codex, gemini, copilot, cursor, opencode, antigravity, hermes) now re-register their current pane on `actas`, so pane-push reaches the live pane even when the role moved panes or sessions. Previously, only a brand-new join registered the pane; an existing role's `actas` left a stale registration and sends printed "pane not alive, skipped". Claude Code already refreshes this path through `actas-claim.sh`.
+- Fall back to a tarball download when git is unavailable (#296)
+- Gate actas/drop's fresh Monitor on delivery mode (#280) (#281)
+- Escape team/agent SQL values in history/inbox/check-inbox (#87) (#272)
+
+### Documentation
+- Add Japanese translations for Tier 1 contributor-facing docs (#291)
+- AGMSG_HOME data-root override, env-var naming convention (#284)
 
 ## [1.1.3] - 2026-06-30
 
@@ -197,8 +233,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handle empty TaskList explicitly to stop fresh-session loop (#71)
 - Storage driver pluginization design (epic #51) (#52)
 
-[1.3.0]: https://github.com/fujibee/agmsg/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/fujibee/agmsg/compare/v1.1.0...v1.2.0
+[1.1.6]: https://github.com/fujibee/agmsg/compare/app-v0.1.3...v1.1.6
+[app-v0.1.3]: https://github.com/fujibee/agmsg/compare/app-v0.1.2...app-v0.1.3
+[app-v0.1.2]: https://github.com/fujibee/agmsg/compare/app-v0.1.1...app-v0.1.2
+[app-v0.1.1]: https://github.com/fujibee/agmsg/compare/v1.1.5...app-v0.1.1
+[app-v0.1.0]: https://github.com/fujibee/agmsg/compare/v1.1.4...app-v0.1.0
+[1.1.4]: https://github.com/fujibee/agmsg/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/fujibee/agmsg/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/fujibee/agmsg/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/fujibee/agmsg/compare/v1.1.0...v1.1.1

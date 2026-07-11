@@ -128,7 +128,8 @@ If argument starts with "actas" followed by an agent name (e.g. "actas alice"):
    `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh register <team> <name> codex "$(pwd)"`
    Run this even when the role was already registered; step 3's `join.sh` only runs for new roles. If this is not a tmux/cmux/wezterm pane, ignore the failure and continue (best-effort).
 5. Set the session's active FROM to `<name>` for every `send.sh` call until another `actas`.
-6. Tell the user: "Now acting as `<name>`. Sends will use `<name>` as the from agent. (Codex has no Monitor tool, so receive still covers all of your registered roles in this project.)"
+6. Record this session as the role's seat so it can be resumed later (best-effort): determine which team `<name>` belongs to (from the identities output / the join above), then run `~/.agents/skills/__SKILL_NAME__/scripts/drivers/types/codex/codex-record-session.sh <team> <name> "$(pwd)"`. It writes the record only when this session's codex thread id is unambiguous; otherwise it records nothing and the role simply boots fresh next time (no harm). This is what lets a later `spawn <role>` bring the role back into this conversation.
+7. Tell the user: "Now acting as `<name>`. Sends will use `<name>` as the from agent. (Codex has no Monitor tool, so receive still covers all of your registered roles in this project.)"
 
 If argument starts with "drop" followed by an agent name (e.g. "drop alice"):
 1. Parse the role name.

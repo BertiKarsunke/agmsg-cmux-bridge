@@ -2,6 +2,8 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # agmsg-cmux-bridge
 
+*[日本語](README.ja.md)*
+
 [![CI](https://img.shields.io/github/actions/workflow/status/fujibee/agmsg/tests.yml?branch=main&label=CI&logo=github)](https://github.com/fujibee/agmsg/actions/workflows/tests.yml)
 [![release](https://img.shields.io/github/v/release/fujibee/agmsg?label=release)](https://github.com/fujibee/agmsg/releases/latest)
 [![license](https://img.shields.io/github/license/fujibee/agmsg)](LICENSE)
@@ -202,6 +204,19 @@ By default `despawn <name>` is **graceful**: it sends a `ctrl:despawn` control m
 
 Despawn only acts on the named member — the session running `despawn` is never torn down, and a broad-subscription watcher ignores a `ctrl:despawn` aimed at another role.
 
+### Bring a role back with its context (session resume)
+
+A role remembers the session that last embodied it: sessions are named
+`<team>-<agent>`, and `spawn` **resumes a role's previous session by default** —
+so re-spawning after a `despawn`, crash, or restart comes back in the prior
+conversation, not blank (`--fresh` forces new). With
+[tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect), one `~/.tmux.conf`
+line re-seats every role pane into its session after a tmux-server restart.
+
+See **[docs/session-resurrect.md](docs/session-resurrect.md)** for the tmux-resurrect
+setup, how it resolves each pane, what does and doesn't come back automatically, and
+the manual fallback.
+
 ## Delivery modes
 
 How incoming messages reach your agent. Pick one at first join via the prompt, or change it later with `/agmsg mode <name>`.
@@ -371,6 +386,21 @@ Basic agmsg flow:
 
 Pane commands:
 
+## Uninstall
+
+An `uninstall.sh` copy ships inside every install, so this works whether you
+installed via `git clone`, `npx agmsg`, or the curl one-liner:
+
+```bash
+~/.agents/skills/agmsg/uninstall.sh              # Interactive (confirms each step)
+~/.agents/skills/agmsg/uninstall.sh --yes        # Remove everything
+~/.agents/skills/agmsg/uninstall.sh --keep-data  # Remove skill but keep DB and teams
+```
+
+(If you have a `git clone` checkout handy, `./uninstall.sh` from the repo root works the same way.)
+
+Auto-detects installed skill directories and cleans up: skill files, slash commands, hooks, AGENTS.md sections, and team configs.
+
 ```bash
 ~/.agents/skills/agmsg/scripts/pane.sh register <team> <name> [type] [project]
 ~/.agents/skills/agmsg/scripts/pane.sh status [<team> <name>]
@@ -534,6 +564,16 @@ and its trust state with `agmsg plugin list`.
 Full discovery order, the trust model, and authoring guidance:
 [docs/plugins.md](docs/plugins.md) (design rationale in
 [ADR 0002](docs/adr/0002-driver-discovery-and-plugin-opt-in.md)).
+
+## Building on agmsg
+
+Writing something *outside* agmsg's own scripts that reads or drives agmsg —
+a GUI app, a bot, a derivative project (`agmsg-shogi`, `agmsg-go`,
+`agmsg-mcp`, …)? Read data via `scripts/api.sh` (JSON out, no need to touch
+`messages.db` or `teams/*/config.json` directly — those are internal and free
+to change), and write through the existing scripts (`send.sh`, `join.sh`,
+…) rather than the database. Full guidance:
+[docs/building-on-agmsg.md](docs/building-on-agmsg.md).
 
 ## Community
 
