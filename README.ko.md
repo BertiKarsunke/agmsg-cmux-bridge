@@ -4,11 +4,11 @@
 
 ## 요약
 
-agmsg-cmux-bridge는 `fujibee/agmsg`의 포크로, tmux/cmux/wezterm turn-mode pane-push로 CLI AI 에이전트 간 메시지를 bridge합니다. Claude Code, Codex, Gemini CLI 같은 에이전트가 데몬이나 네트워크 서비스 없이 로컬 SQLite를 통해 서로 메시지를 주고받을 수 있습니다.
+agmsg-cmux-bridge는 `fujibee/agmsg`의 포크로, tmux/cmux/WezTerm/Kaku/herdr turn-mode pane-push로 CLI AI 에이전트 간 메시지를 bridge합니다. Claude Code, Codex, Gemini CLI 같은 에이전트가 데몬이나 네트워크 서비스 없이 로컬 SQLite를 통해 서로 메시지를 주고받을 수 있습니다.
 
 ## 이 포크에서 추가된 것
 
-원본 agmsg는 로컬 스크립트와 SQLite로 메시지를 저장하고 읽습니다. 이 포크는 best-effort turn-mode pane-push를 추가합니다. `scripts/send.sh`가 메시지를 저장한 뒤 수신자에게 등록된 tmux 또는 cmux pane이 있는지 확인하고, 해당 에이전트가 agmsg skill을 실행해 inbox를 읽도록 짧은 프롬프트를 주입합니다.
+원본 agmsg는 로컬 스크립트와 SQLite로 메시지를 저장하고 읽습니다. 이 포크는 best-effort turn-mode pane-push를 추가합니다. `scripts/send.sh`가 메시지를 저장한 뒤 수신자에게 등록된 tmux, cmux, WezTerm/Kaku 또는 herdr pane이 있는지 확인하고, 해당 에이전트가 agmsg skill을 실행해 inbox를 읽도록 짧은 프롬프트를 주입합니다.
 
 Pane 등록은 role 생명주기를 따릅니다.
 
@@ -21,7 +21,7 @@ Pane 등록은 role 생명주기를 따릅니다.
 
 ## 동작 방식
 
-Pane 지원은 `scripts/lib/pane.sh`와 `scripts/pane.sh`에 있습니다. 백엔드는 자동 감지됩니다. tmux는 `$TMUX`와 `tmux`가 사용 가능할 때 `$TMUX_PANE`을 사용합니다. cmux는 `cmux identify --json`의 `caller.surface_ref` 값을 사용하고, 필요하면 `$CMUX_SURFACE_ID`를 fallback으로 사용합니다. WezTerm/Kaku는 `$WEZTERM_PANE`으로 감지하고 `$WEZTERM_UNIX_SOCKET` 또는 `$KAKU_UNIX_SOCKET` 소켓을 사용합니다.
+Pane 지원은 `scripts/lib/pane.sh`와 `scripts/pane.sh`에 있습니다. 백엔드는 자동 감지됩니다. tmux는 `$TMUX`와 `tmux`가 사용 가능할 때 `$TMUX_PANE`을 사용합니다. cmux는 `cmux identify --json`의 `caller.surface_ref` 값을 사용하고, 필요하면 `$CMUX_SURFACE_ID`를 fallback으로 사용합니다. WezTerm/Kaku는 `$WEZTERM_PANE`으로 감지하고 `$WEZTERM_UNIX_SOCKET` 또는 `$KAKU_UNIX_SOCKET` 소켓을 사용합니다. herdr는 `$HERDR_ENV=1`과 `$HERDR_PANE_ID`로 감지하며 설정된 소켓을 사용합니다. Herdr의 spawn, nudge, despawn, doctor를 지원하며 herdr 0.7.0에서 검증했습니다.
 
 등록 정보는 설치된 skill 디렉터리 아래에 다음 형식으로 저장됩니다.
 
@@ -83,7 +83,7 @@ Pane 명령:
 - `send.sh`: SQLite에 메시지를 저장하고, pane-push가 활성화되어 있으며 수신자의 등록 pane이 살아 있으면 해당 pane을 깨웁니다.
 - `inbox.sh`: 에이전트의 새 메시지를 읽고 읽음 처리합니다.
 - `history.sh`: 팀의 메시지 history를 출력합니다.
-- `pane.sh register`: role에 대해 현재 tmux/cmux pane을 기록합니다.
+- `pane.sh register`: role에 대해 현재 tmux/cmux/WezTerm/Kaku/herdr pane을 기록합니다.
 - `pane.sh status`: pane 등록 목록을 출력하거나, team과 name이 주어지면 해당 등록 하나를 출력합니다.
 - `pane.sh lookup`: 등록된 backend, address, project, type을 machine-readable 형식으로 출력합니다.
 - `pane.sh test`: 등록된 살아 있는 pane에 test ping을 주입합니다.

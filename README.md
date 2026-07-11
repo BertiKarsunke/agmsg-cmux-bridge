@@ -10,11 +10,11 @@ Cross-agent messaging for CLI AI agents. No daemon, no network, no complexity.
 
 ## Summary
 
-agmsg-cmux-bridge is a fork of `fujibee/agmsg` that bridges CLI AI agents with tmux/cmux/wezterm turn-mode pane-push: Claude Code, Codex, Gemini CLI, and other agents can message each other through local SQLite without a daemon or network service.
+agmsg-cmux-bridge is a fork of `fujibee/agmsg` that bridges CLI AI agents with tmux/cmux/WezTerm/Kaku/herdr turn-mode pane-push: Claude Code, Codex, Gemini CLI, and other agents can message each other through local SQLite without a daemon or network service.
 
 ## What This Fork Adds
 
-The original agmsg stores and reads messages through local scripts and SQLite. This fork adds best-effort turn-mode pane-push: after `scripts/send.sh` stores a message, it checks whether the recipient has a registered tmux or cmux pane and injects a short prompt asking that agent to run its agmsg skill and read the inbox.
+The original agmsg stores and reads messages through local scripts and SQLite. This fork adds best-effort turn-mode pane-push: after `scripts/send.sh` stores a message, it checks whether the recipient has a registered tmux, cmux, WezTerm/Kaku, or herdr pane and injects a short prompt asking that agent to run its agmsg skill and read the inbox.
 
 Pane registrations follow the role lifecycle:
 
@@ -27,7 +27,7 @@ That lets agmsg-cmux-bridge track the live pane for a role as the role joins, sw
 
 ## How It Works
 
-Pane support lives in `scripts/lib/pane.sh` and `scripts/pane.sh`. The backend is detected automatically: tmux uses `$TMUX_PANE` when `$TMUX` and `tmux` are available; cmux uses `cmux identify --json` and its `caller.surface_ref` value, with `$CMUX_SURFACE_ID` as a fallback; WezTerm/Kaku uses `$WEZTERM_PANE` and the `$WEZTERM_UNIX_SOCKET` or `$KAKU_UNIX_SOCKET` socket.
+Pane support lives in `scripts/lib/pane.sh` and `scripts/pane.sh`. The backend is detected automatically: tmux uses `$TMUX_PANE` when `$TMUX` and `tmux` are available; cmux uses `cmux identify --json` and its `caller.surface_ref` value, with `$CMUX_SURFACE_ID` as a fallback; WezTerm/Kaku uses `$WEZTERM_PANE` and the `$WEZTERM_UNIX_SOCKET` or `$KAKU_UNIX_SOCKET` socket; herdr uses `$HERDR_PANE_ID` when `$HERDR_ENV=1` (including its configured socket). Herdr supports spawn, nudge, despawn, and doctor, and was verified with herdr 0.7.0.
 
 Registrations are written under the installed skill directory as:
 
@@ -385,7 +385,7 @@ Command summary:
 - `send.sh`: stores a message in SQLite and nudges the recipient's registered pane when pane-push is enabled and the pane is alive.
 - `inbox.sh`: reads new messages for an agent and marks them as read.
 - `history.sh`: prints message history for a team.
-- `pane.sh register`: records the current tmux/cmux pane for a role.
+- `pane.sh register`: records the current tmux/cmux/WezTerm/Kaku/herdr pane for a role.
 - `pane.sh status`: lists pane registrations, or one registration when team and name are supplied.
 - `pane.sh lookup`: prints the registered backend, address, project, and type in a machine-readable form.
 - `pane.sh test`: injects a test ping into the registered live pane.

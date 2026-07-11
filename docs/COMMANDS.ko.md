@@ -35,7 +35,7 @@
 
 ## 2. pane 명령 (turn-mode pane-push)
 
-pane-push가 켜져 있으면(`AGMSG_PANE_PUSH=1`, 기본값) 메시지를 보낼 때 수신자의 tmux/cmux/wezterm pane을 깨워 즉시 읽게 한다. 그러려면 수신자가 자기 pane을 등록해 둬야 한다(`join`/`actas`가 자동 등록, Codex는 매 턴 자동 갱신).
+pane-push가 켜져 있으면(`AGMSG_PANE_PUSH=1`, 기본값) 메시지를 보낼 때 수신자의 tmux/cmux/wezterm/herdr pane을 깨워 즉시 읽게 한다. Herdr는 `$HERDR_ENV=1`과 `$HERDR_PANE_ID`로 감지되며 spawn/nudge/despawn/doctor를 지원하고 herdr 0.7.0에서 검증했다. 그러려면 수신자가 자기 pane을 등록해 둬야 한다(`join`/`actas`가 자동 등록, Codex는 매 턴 자동 갱신).
 
 Codex(`$agmsg pane …`) 또는 셸(`pane.sh …`)에서:
 

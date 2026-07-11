@@ -4,11 +4,11 @@
 
 ## 概要
 
-agmsg-cmux-bridgeは`fujibee/agmsg`のフォークで、tmux/cmux/wezterm turn-mode pane-pushによりCLI AIエージェント間のメッセージをbridgeします。Claude Code、Codex、Gemini CLIなどのエージェントが、デーモンやネットワークサービスなしでローカルSQLiteを通じてメッセージをやり取りできます。
+agmsg-cmux-bridgeは`fujibee/agmsg`のフォークで、tmux/cmux/WezTerm/Kaku/herdr turn-mode pane-pushによりCLI AIエージェント間のメッセージをbridgeします。Claude Code、Codex、Gemini CLIなどのエージェントが、デーモンやネットワークサービスなしでローカルSQLiteを通じてメッセージをやり取りできます。
 
 ## このフォークで追加されたもの
 
-元のagmsgはローカルスクリプトとSQLiteでメッセージを保存し、読み取ります。このフォークはbest-effort turn-mode pane-pushを追加します。`scripts/send.sh`がメッセージを保存した後、受信者に登録済みのtmuxまたはcmux paneがあるか確認し、そのエージェントにagmsg skillを実行してinboxを読むよう短いプロンプトを注入します。
+元のagmsgはローカルスクリプトとSQLiteでメッセージを保存し、読み取ります。このフォークはbest-effort turn-mode pane-pushを追加します。`scripts/send.sh`がメッセージを保存した後、受信者に登録済みのtmux、cmux、WezTerm/Kaku、またはherdr paneがあるか確認し、そのエージェントにagmsg skillを実行してinboxを読むよう短いプロンプトを注入します。
 
 Pane登録はroleのライフサイクルに従います。
 
@@ -21,7 +21,7 @@ Pane登録はroleのライフサイクルに従います。
 
 ## 動作方式
 
-Pane対応は`scripts/lib/pane.sh`と`scripts/pane.sh`にあります。バックエンドは自動検出されます。tmuxは`$TMUX`と`tmux`が利用可能なときに`$TMUX_PANE`を使います。cmuxは`cmux identify --json`の`caller.surface_ref`値を使い、必要に応じて`$CMUX_SURFACE_ID`をfallbackとして使います。WezTerm/Kakuは`$WEZTERM_PANE`で検出され、`$WEZTERM_UNIX_SOCKET`または`$KAKU_UNIX_SOCKET`ソケットを使います。
+Pane対応は`scripts/lib/pane.sh`と`scripts/pane.sh`にあります。バックエンドは自動検出されます。tmuxは`$TMUX`と`tmux`が利用可能なときに`$TMUX_PANE`を使います。cmuxは`cmux identify --json`の`caller.surface_ref`値を使い、必要に応じて`$CMUX_SURFACE_ID`をfallbackとして使います。WezTerm/Kakuは`$WEZTERM_PANE`で検出され、`$WEZTERM_UNIX_SOCKET`または`$KAKU_UNIX_SOCKET`ソケットを使います。herdrは`$HERDR_ENV=1`と`$HERDR_PANE_ID`で検出され、設定されたソケットを使います。Herdrのspawn、nudge、despawn、doctorをサポートし、herdr 0.7.0で検証済みです。
 
 登録情報は、インストール済みskillディレクトリの下に次の形式で保存されます。
 
@@ -83,7 +83,7 @@ Paneコマンド:
 - `send.sh`: SQLiteにメッセージを保存し、pane-pushが有効で受信者の登録paneが生きていれば、そのpaneを起こします。
 - `inbox.sh`: エージェントの新しいメッセージを読み、既読にします。
 - `history.sh`: チームのメッセージhistoryを出力します。
-- `pane.sh register`: roleに対して現在のtmux/cmux paneを記録します。
+- `pane.sh register`: roleに対して現在のtmux/cmux/WezTerm/Kaku/herdr paneを記録します。
 - `pane.sh status`: pane登録一覧を出力するか、teamとnameが指定された場合はその登録1件を出力します。
 - `pane.sh lookup`: 登録されたbackend、address、project、typeをmachine-readable形式で出力します。
 - `pane.sh test`: 登録済みの生きているpaneへtest pingを注入します。
