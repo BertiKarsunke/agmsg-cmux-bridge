@@ -2,17 +2,11 @@ English | [한국어](README.ko.md) | [日本語](README.ja.md)
 
 # agmsg-cmux-bridge
 
-*[日本語](README.ja.md)*
-
-[![CI](https://img.shields.io/github/actions/workflow/status/fujibee/agmsg/tests.yml?branch=main&label=CI&logo=github)](https://github.com/fujibee/agmsg/actions/workflows/tests.yml)
-[![release](https://img.shields.io/github/v/release/fujibee/agmsg?label=release)](https://github.com/fujibee/agmsg/releases/latest)
-[![license](https://img.shields.io/github/license/fujibee/agmsg)](LICENSE)
-
 Cross-agent messaging for CLI AI agents. No daemon, no network, no complexity.
 
 ## Summary
 
-agmsg-cmux-bridge is a fork of `fujibee/agmsg` that bridges CLI AI agents with tmux/cmux/WezTerm/Kaku/herdr turn-mode pane-push: Claude Code, Codex, Gemini CLI, and other agents can message each other through local SQLite without a daemon or network service.
+agmsg-cmux-bridge is a fork of [fujibee/agmsg](https://github.com/fujibee/agmsg) that bridges CLI AI agents with tmux/cmux/WezTerm/Kaku/herdr turn-mode pane-push: Claude Code, Codex, Gemini CLI, and other agents can message each other through local SQLite without a daemon or network service.
 
 ## What This Fork Adds
 
@@ -37,65 +31,31 @@ Registrations are written under the installed skill directory as:
 run/pane.<team>.<name>.json
 ```
 
-Each record stores the backend, pane address, project, agent type, and registration timestamp. When pane-push is active, `scripts/send.sh` verifies that the registered pane is still alive and injects an inbox-check prompt. Injection sends the text, waits for `AGMSG_PANE_COMMIT_DELAY`, sends Enter, waits again, then sends a second Enter.
+Each record stores the backend, pane address, project, agent type, registration timestamp, and optional `owner` session token. `scripts/pane.sh register` accepts `owner` as its fifth optional value. If an existing registration has a live owner, a different or ownerless writer is refused (`agmsg_pane_registry_write` returns `rc=3`; the CLI exits 1 with an explanatory error). The same owner may refresh its registration, and a dead owner may be replaced.
+
+When pane-push is active, `scripts/send.sh` verifies that the registered pane is still alive and injects an inbox-check prompt. If another role in the same team has the same backend and pane address, `send.sh` prints a collision `WARNING` but keeps the stored message authoritative and continues the best-effort push. Injection sends the text, waits for `AGMSG_PANE_COMMIT_DELAY`, sends Enter, waits again, then sends a second Enter.
 
 ## Installation
 
 Requirements: `bash` and `sqlite3`. macOS includes both; minimal Linux environments may need a package such as `sqlite3`.
 
-For the agmsg-cmux-bridge fork, install from this checkout so the pane-push scripts are included:
+Install from this checkout so the pane-push scripts are included (the upstream npm package and Claude Code plugin marketplace install `fujibee/agmsg` **without** the pane-push layer — don't use those for this fork):
 
 ```bash
-git clone <this-repository-url>
+git clone https://github.com/BertiKarsunke/agmsg-cmux-bridge.git
 cd agmsg-cmux-bridge
-./install.sh
-```
-
-`install.sh` installs the skill to `~/.agents/skills/<cmd>/`, where `<cmd>` defaults to `agmsg`. Useful options from the script are:
-
-```bash
-./install.sh --cmd m
-./install.sh --agent-type gemini
-./install.sh --agent-type opencode
-npx agmsg            # one-shot, no global install
-# or
-npm i -g agmsg && agmsg install
-```
-
-The npm package is a thin bootstrapper that downloads and runs the canonical `setup.sh`. Published from this repo via [npm Trusted Publisher (OIDC)](https://docs.npmjs.com/trusted-publishers) with [SLSA provenance](https://slsa.dev/) — the attestation is visible at <https://www.npmjs.com/package/agmsg>.
-
-### Claude Code plugin marketplace
-
-Inside Claude Code:
-
-```
-/plugin marketplace add fujibee/agmsg
-/plugin install agmsg@fujibee-agmsg
-/reload-plugins
-/agmsg
-```
-
-The plugin install path drops the skill into `~/.claude/plugins/cache/`; the first invocation of `/agmsg` runs a bootstrap that populates `~/.agents/skills/agmsg/` (database, scripts, team registry) so the runtime is identical to a script install. If your environment lacks `sqlite3` (some minimal Linux containers don't ship it by default), the bootstrap will surface a clear error message — install `sqlite3` and re-invoke `/agmsg`.
-
-### Direct script
-
-Clone the repo first, then run the installer — this is also the path that always tracks the latest `main`:
-
-```bash
-git clone https://github.com/fujibee/agmsg.git
-cd agmsg
 ./install.sh              # Interactive (asks command name, default: agmsg)
 ./install.sh --cmd m      # Non-interactive with custom command name
 ./install.sh --agent-type gemini    # Install a Gemini-oriented SKILL.md
 ./install.sh --agent-type opencode  # OpenCode-only: sets shared skill to OpenCode template
 ```
 
+`install.sh` installs the skill to `~/.agents/skills/<cmd>/`, where `<cmd>` defaults to `agmsg`.
+
 The **command name** determines:
 - Skill folder: `~/.agents/skills/<cmd>/`
 - Claude Code / Copilot CLI: `/<cmd>`
 - Codex / Gemini CLI / Antigravity: `$<cmd>`
-
-`--cmd` and `--agent-type` are only available via the direct-script path; the `npm` and plugin paths always install as `agmsg` and auto-detect the host agent type.
 
 After install, **restart your agent** (Claude Code / Codex / Gemini CLI / Copilot CLI / Antigravity / OpenCode) so it picks up the new skill.
 
@@ -189,6 +149,16 @@ codex:
 
 Eight of the nine agent types are spawnable — `claude-code`, `codex`, `grok-build`, `cursor`, `gemini`, `antigravity`, `copilot`, `opencode`. `hermes` is not: its CLI has no mode that starts an interactive session pre-seeded with an initial prompt (#279). macOS is the primary target; Linux and Windows are best-effort (please open an issue/PR if your terminal isn't handled). Headless environments — no tmux **and** no usable terminal — error out, since the agent CLIs need an interactive terminal.
 
+### Bootstrap planner, scout, and executor (`agmsg-setup.sh`)
+
+In a cmux session, bootstrap the standard three-agent layout with:
+
+```bash
+~/.agents/skills/agmsg/scripts/agmsg-setup.sh <team> [--project <path>]
+```
+
+The project defaults to `$PWD`. The wrapper calls `spawn.sh` sequentially for `claude-code planner`, `codex scout`, and `codex executor`, reusing spawn's join, pane pinning, and placement behavior. It stops at the first failed spawn, identifies the failed type/role, and exits non-zero.
+
 ### Tear down a spawned agent (`despawn`)
 
 `despawn` is the inverse of `spawn` — it cleanly tears down a member you brought up.
@@ -280,6 +250,8 @@ $agmsg                          — or /skills → agmsg
 
 Codex supports `mode monitor` as a **beta** app-server bridge, plus `mode turn` and `mode off`.
 
+Codex's default no-argument `$agmsg` action is inbox-only: it does not automatically register a pane from an incoming nudge. Pane registration happens when `actas <name>` explicitly switches roles, or when `pane register` is explicitly run for the session's active AGENT; never register every identity or a role merely named by a nudge.
+
 > ⚠️ **The monitor beta changes how Codex starts — opt in only if you understand it.** Codex has no Monitor tool, so `mode monitor` prints a shell function that makes `codex` route through agmsg's monitor shim in your interactive shell. In monitor-mode projects the shim routes interactive launches through a bridge that turns incoming agmsg messages into turns on the current Codex thread; `codex exec` and non-monitor projects pass straight through to the real Codex. It depends on experimental Codex app-server behavior and has known rough edges (orphans on TUI close — #149; one identity per project — #150).
 
 If you prefer a global PATH shim, run `~/.agents/skills/<cmd>/scripts/drivers/types/codex/codex-shim-install.sh install` and put `~/.agents/bin` before the real Codex binary on PATH. You can also launch with `~/.agents/skills/<cmd>/scripts/drivers/types/codex/codex-monitor.sh`. Codex sandboxing must allow writes to the skill's `db/`, `teams/`, and `run/` dirs — `install.sh` configures those `writable_roots` when `~/.codex/config.toml` exists. Setup notes and internals: [docs/codex-monitor-beta.md](docs/codex-monitor-beta.md).
@@ -364,7 +336,7 @@ The message store is effectively a replay log. There's no one-shot "rehydrate fr
 ## Update
 
 ```bash
-cd agmsg
+cd agmsg-cmux-bridge
 git pull
 ./install.sh --update
 ```
@@ -373,7 +345,7 @@ After installation, restart the agent CLI so it discovers the skill, then run `/
 
 Current `setup.sh` behavior is upstream-specific: it clones `https://github.com/fujibee/agmsg.git` at `${AGMSG_REF:-main}` and runs that checkout's `install.sh`. Use `setup.sh` only when you intentionally want the canonical upstream installer, unless it is changed to point at this fork.
 
-## Usage
+## Script reference
 
 Basic agmsg flow:
 
@@ -386,10 +358,31 @@ Basic agmsg flow:
 
 Pane commands:
 
+```bash
+~/.agents/skills/agmsg/scripts/pane.sh register <team> <name> [type] [project] [owner]
+~/.agents/skills/agmsg/scripts/pane.sh status [<team> <name>]
+~/.agents/skills/agmsg/scripts/pane.sh lookup <team> <name>
+~/.agents/skills/agmsg/scripts/pane.sh test <team> <name>
+~/.agents/skills/agmsg/scripts/pane.sh unregister <team> <name>
+```
+
+Command summary:
+
+- `join.sh`: joins or creates a team and, when possible, registers the current pane for turn-mode pane-push.
+- `send.sh`: stores a message in SQLite and nudges the recipient's registered pane when pane-push is enabled and the pane is alive; warns but continues when two roles share one pane address.
+- `inbox.sh`: reads new messages for an agent and marks them as read.
+- `history.sh`: prints message history for a team.
+- `pane.sh register`: records the current tmux/cmux/WezTerm/Kaku/herdr pane for a role; a different or ownerless writer cannot replace a live-owned registration.
+- `pane.sh status`: lists pane registrations, or one registration when team and name are supplied.
+- `pane.sh lookup`: prints the registered backend, address, project, and type in a machine-readable form.
+- `pane.sh test`: injects a test ping into the registered live pane.
+- `pane.sh unregister`: removes the pane registration for a role.
+
+A project can belong to multiple teams; monitor and turn-mode delivery both process every `(team, agent)` pair registered for that project.
+
 ## Uninstall
 
-An `uninstall.sh` copy ships inside every install, so this works whether you
-installed via `git clone`, `npx agmsg`, or the curl one-liner:
+An `uninstall.sh` copy ships inside every install:
 
 ```bash
 ~/.agents/skills/agmsg/uninstall.sh              # Interactive (confirms each step)
@@ -400,28 +393,6 @@ installed via `git clone`, `npx agmsg`, or the curl one-liner:
 (If you have a `git clone` checkout handy, `./uninstall.sh` from the repo root works the same way.)
 
 Auto-detects installed skill directories and cleans up: skill files, slash commands, hooks, AGENTS.md sections, and team configs.
-
-```bash
-~/.agents/skills/agmsg/scripts/pane.sh register <team> <name> [type] [project]
-~/.agents/skills/agmsg/scripts/pane.sh status [<team> <name>]
-~/.agents/skills/agmsg/scripts/pane.sh lookup <team> <name>
-~/.agents/skills/agmsg/scripts/pane.sh test <team> <name>
-~/.agents/skills/agmsg/scripts/pane.sh unregister <team> <name>
-```
-
-Command summary:
-
-- `join.sh`: joins or creates a team and, when possible, registers the current pane for turn-mode pane-push.
-- `send.sh`: stores a message in SQLite and nudges the recipient's registered pane when pane-push is enabled and the pane is alive.
-- `inbox.sh`: reads new messages for an agent and marks them as read.
-- `history.sh`: prints message history for a team.
-- `pane.sh register`: records the current tmux/cmux/WezTerm/Kaku/herdr pane for a role.
-- `pane.sh status`: lists pane registrations, or one registration when team and name are supplied.
-- `pane.sh lookup`: prints the registered backend, address, project, and type in a machine-readable form.
-- `pane.sh test`: injects a test ping into the registered live pane.
-- `pane.sh unregister`: removes the pane registration for a role.
-
-A project can belong to multiple teams; monitor and turn-mode delivery both process every `(team, agent)` pair registered for that project.
 
 ## Environment Variables
 
@@ -436,11 +407,11 @@ A project can belong to multiple teams; monitor and turn-mode delivery both proc
 
 ## Credits and License
 
-agmsg-cmux-bridge is based on `fujibee/agmsg`, licensed under MIT. The pane integration pattern is borrowed from `paichi/cmux-bridge`, also licensed under MIT.
+agmsg-cmux-bridge is based on [fujibee/agmsg](https://github.com/fujibee/agmsg), licensed under MIT. The pane integration pattern is borrowed from [paichi/cmux-bridge](https://github.com/paichi/cmux-bridge), also licensed under MIT.
 
 See `CREDITS.md` for attribution details and `LICENSE` for the MIT license text.
 
-### Sandbox compatibility (Claude Code)
+## Sandbox compatibility (Claude Code)
 
 Claude Code's sandbox restricts filesystem writes to the project directory. In `monitor` mode, `watch.sh` runs inside the sandbox and needs to write pidfiles and SQLite WAL files under `~/.agents/skills/agmsg/`. If you have sandboxing enabled, add an allowlist entry to your settings:
 
@@ -462,7 +433,7 @@ This can also go in project-level `.claude/settings.local.json` if you prefer pe
 
 If you installed agmsg under a custom command name (e.g. `m`), adjust the path accordingly (`~/.agents/skills/m/`).
 
-### Sandbox compatibility (Codex)
+## Sandbox compatibility (Codex)
 
 Codex may run shell commands in a workspace-write sandbox. agmsg stores its
 SQLite database and team metadata under `~/.agents/skills/<cmd>/` by default,
@@ -574,30 +545,6 @@ a GUI app, a bot, a derivative project (`agmsg-shogi`, `agmsg-go`,
 to change), and write through the existing scripts (`send.sh`, `join.sh`,
 …) rather than the database. Full guidance:
 [docs/building-on-agmsg.md](docs/building-on-agmsg.md).
-
-## Community
-
-- **Product Hunt**: #5 Product of the Day, [2026-06-09 launch](https://www.producthunt.com/products/agmsg) — 219 upvotes, 39 comments
-- **Derivative projects**: `agmsg-shogi`, `agmsg-go`, `agmsg-mcp` (community-built)
-- **External contributors**: [@MiuraKatsu](https://github.com/MiuraKatsu) (Gemini support + whoami auto-detect), [@roundrop](https://github.com/roundrop) (Copilot CLI support), [@TOMONOSUKEJP](https://github.com/TOMONOSUKEJP) (native Windows / Git Bash), [@kenshin-yamada](https://github.com/kenshin-yamada) (watcher scoping fix), [@utenadev](https://github.com/utenadev) (OpenCode contribution), [@lucianlamp](https://github.com/lucianlamp) (native Windows PowerShell helpers), [@tatsuya6502](https://github.com/tatsuya6502) (sandboxed Bash tool support)
-
-## Project site (agmsg.cc)
-
-[agmsg.cc](https://agmsg.cc) is an Astro project under [`site/`](site/).
-
-- **Source of truth:** `site/` (Astro + Tailwind). The built output is **not** committed — CI builds it.
-- **Local preview:**
-  ```bash
-  cd site
-  npm install
-  npm run dev        # http://localhost:4321, live reload
-  # or, to serve the production build:
-  npm run build && npm run preview
-  ```
-- **Publish:** pushing to `main` with changes under `site/` runs [`.github/workflows/pages.yml`](.github/workflows/pages.yml), which builds the site and deploys it to GitHub Pages. The custom domain is set by `site/public/CNAME`.
-- The agent-types gallery is generated at build time from `scripts/drivers/types/*/type.conf`, so adding an agent type surfaces it on the site automatically.
-
-`docs/` is developer documentation (markdown, ADRs, spec) read on GitHub — it is **not** the published site.
 
 ## Contributing
 

@@ -59,17 +59,19 @@ Do NOT manually edit config files. Always use join.sh.
 # Send a message
 ~/.agents/skills/agmsg/scripts/send.sh <team> <from_agent> <to_agent> "<message>"
 
-Turn-mode pane-push: after `send.sh` stores a message, if the recipient has a registered tmux/cmux pane, agmsg-cmux-bridge injects an inbox-check prompt into that pane. Set `AGMSG_PANE_PUSH=0` to disable this best-effort push path. Set `AGMSG_PANE_COMMIT_DELAY` to tune the Enter delay used for pane injection.
+Turn-mode pane-push: after `send.sh` stores a message, if the recipient has a registered tmux/cmux pane, agmsg-cmux-bridge injects an inbox-check prompt into that pane. If another role in the team shares the same backend/address, `send.sh` prints a collision `WARNING` and continues the best-effort push. Set `AGMSG_PANE_PUSH=0` to disable this path. Set `AGMSG_PANE_COMMIT_DELAY` to tune the Enter delay used for pane injection.
 
 Pane commands:
 
 ```bash
-~/.agents/skills/agmsg/scripts/pane.sh register <team> <name> [type] [project]
+~/.agents/skills/agmsg/scripts/pane.sh register <team> <name> [type] [project] [owner]
 ~/.agents/skills/agmsg/scripts/pane.sh status [<team> <name>]
 ~/.agents/skills/agmsg/scripts/pane.sh lookup <team> <name>
 ~/.agents/skills/agmsg/scripts/pane.sh test <team> <name>
 ~/.agents/skills/agmsg/scripts/pane.sh unregister <team> <name>
 ```
+
+The optional `owner` is the session token stored in the pane registry. A different or ownerless writer cannot replace a live-owned entry (`agmsg_pane_registry_write` returns `rc=3`; `pane.sh register` exits 1 with an error). Same-owner refresh and dead-owner replacement remain allowed.
 
 # Message history
 ~/.agents/skills/agmsg/scripts/history.sh <team> [agent_id] [limit]
@@ -111,6 +113,9 @@ Pane commands:
 # subscribing to <name> while this session holds the lock. `drop` releases.
 # Codex: actas is send-side only (no stable session_id during slash commands
 # → no peer-visible lock). See README "Codex caveat" for details.
+# Codex's default no-argument action is inbox-only. Register a pane only during
+# explicit actas or `pane register` for the session's active AGENT; never from
+# a nudge's target role or by iterating every identity.
 ~/.agents/skills/agmsg/scripts/actas-claim.sh "$(pwd)" <type> <name> "$session_id"
 ~/.agents/skills/agmsg/scripts/reset.sh "$(pwd)" <type> <name> "$session_id"
 
@@ -145,6 +150,12 @@ Pane commands:
 #                        to a codex peer (no Monitor → a post-spawn send to its
 #                        idle session is never noticed).
 ~/.agents/skills/agmsg/scripts/spawn.sh <claude-code|codex> <name> [options]
+
+# Bootstrap the standard cmux collaboration layout by invoking spawn.sh in
+# order: claude-code/planner, codex/scout, codex/executor. Project defaults to
+# $PWD; stops at the first failure, identifies the failed stage, and exits
+# non-zero.
+~/.agents/skills/agmsg/scripts/agmsg-setup.sh <team> [--project <path>]
 
 # Tear down a spawned member — the inverse of spawn.
 # Default (graceful): sends a `ctrl:despawn` control message to <name>; the
