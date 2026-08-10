@@ -109,6 +109,17 @@ _install_fake_herdr() {
   [[ "$output" =~ "pane-push: nudged bob (tmux %9)" ]]
 }
 
+@test "send: warns when two agents share one pane addr" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register testteam bob claude-code /tmp/project-b >/dev/null
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register testteam carol codex /tmp/project-b >/dev/null
+
+  run env AGMSG_PANE_COMMIT_DELAY=0 bash "$SCRIPTS/send.sh" testteam alice bob "hello shared pane"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "pane-push: WARNING bob shares tmux pane %9 with carol (collision — run pane.sh doctor)" ]]
+  [[ "$output" =~ "pane-push: nudged bob (tmux %9)" ]]
+}
+
 @test "send: nudges registered wezterm pane with stored socket" {
   _install_fake_wezterm
   AGMSG_PANE_BACKEND=wezterm AGMSG_PANE_SELF=6 KAKU_UNIX_SOCKET=/tmp/kaku.sock bash "$SCRIPTS/pane.sh" register testteam bob claude-code /tmp/project-b >/dev/null

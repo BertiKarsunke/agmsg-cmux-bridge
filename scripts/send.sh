@@ -70,8 +70,27 @@ agmsg_send_pane_push() {
     return 0
   fi
 
+  # Warn when another agent in this team is registered at the same pane: the
+  # nudge below wakes whoever owns that pane, not necessarily $TO. Detection
+  # only in `pane.sh doctor` let this go unnoticed for days (agmsg-role-sharing).
+  local f other other_info shared=""
+  for f in "$skill_dir/run/pane.$TEAM."*.json; do
+    [ -e "$f" ] || continue
+    other="$(basename "$f")"
+    other="${other#pane.$TEAM.}"
+    other="${other%.json}"
+    [ "$other" = "$TO" ] && continue
+    other_info="$(agmsg_pane_registry_read "$TEAM" "$other" 2>/dev/null)" || continue
+    [ "$(agmsg_pane_registry_field "$other_info" 1)" = "$backend" ] || continue
+    [ "$(agmsg_pane_registry_field "$other_info" 2)" = "$addr" ] || continue
+    shared="${shared:+$shared, }$other"
+  done
+  if [ -n "$shared" ]; then
+    echo "pane-push: WARNING $TO shares $backend pane $addr with $shared (collision — run pane.sh doctor)"
+  fi
+
   if agmsg_pane_alive "$backend" "$addr" "$socket" 2>/dev/null; then
-    wake="[agmsg-cmux] '$FROM' sent you a new agmsg message (team=$TEAM). Run your agmsg skill to read the inbox and handle it now."
+    wake="[agmsg-cmux] New agmsg message: '$FROM' -> '$TO' (team=$TEAM). You are '$TO' — run your agmsg skill to read your inbox and handle it now."
     if agmsg_pane_inject "$backend" "$addr" "$wake" "$socket" 2>/dev/null; then
       echo "pane-push: nudged $TO ($backend $addr)"
     fi
