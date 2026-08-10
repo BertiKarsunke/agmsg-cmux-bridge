@@ -74,6 +74,59 @@ _install_fake_herdr() {
   [ "$status" -ne 0 ]
 }
 
+@test "pane: registry_write refuses to steal a live-owned registration" {
+  run env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash -c 'source "$1/lib/pane.sh"
+    agmsg_instance_alive() { [ "$1" = live-a ]; }
+    agmsg_pane_registry_write opus48 executor codex /tmp/x live-a
+    rc=0; AGMSG_PANE_SELF=%7 agmsg_pane_registry_write opus48 executor codex /tmp/x other-b 2>/dev/null || rc=$?
+    [ "$rc" -eq 3 ] || exit 9
+    agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%9\t/tmp/x\tcodex\t' ]
+}
+
+@test "pane: registry_write replaces a dead-owned registration" {
+  run env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash -c 'source "$1/lib/pane.sh"
+    agmsg_instance_alive() { return 1; }
+    agmsg_pane_registry_write opus48 executor codex /tmp/x dead-a
+    AGMSG_PANE_SELF=%7 agmsg_pane_registry_write opus48 executor codex /tmp/x other-b
+    agmsg_pane_registry_read opus48 executor' _ "$SCRIPTS"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%7\t/tmp/x\tcodex\t' ]
+}
+
+@test "pane: cli register protects a live owner from ownerless overwrite" {
+  local live_owner="live-owner.$$"
+  env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
+    bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x "$live_owner" >/dev/null
+
+  run env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%8 \
+    bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x "$live_owner"
+  [ "$status" -eq 0 ]
+
+  run env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%7 \
+    bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"owned by live session $live_owner; not overwriting"* ]]
+
+  run bash "$SCRIPTS/pane.sh" lookup opus48 executor
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%8\t/tmp/x\tcodex\t' ]
+}
+
+@test "pane: cli register replaces a dead owner with ownerless write" {
+  env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
+    bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x dead-owner.99999999 >/dev/null
+
+  run env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%7 \
+    bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x
+  [ "$status" -eq 0 ]
+
+  run bash "$SCRIPTS/pane.sh" lookup opus48 executor
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%7\t/tmp/x\tcodex\t' ]
+}
+
 @test "pane: clear-if-owner removes legacy ownerless registrations" {
   AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash -c 'source "$1/lib/pane.sh"; agmsg_pane_registry_write opus48 executor codex /tmp/x' _ "$SCRIPTS"
 

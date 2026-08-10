@@ -315,6 +315,20 @@ agmsg_pane_registry_write() {
   socket="$(agmsg_pane_socket "$backend")"
 
   path="$(agmsg_pane_registry_path "$team" "$name")" || return 1
+
+  # No writer may steal a registration another LIVE session owns — including
+  # ownerless register calls. A same-owner refresh remains valid, and a dead
+  # owner is always replaceable. Liveness needs instance-id.sh; when it isn't
+  # loaded, behave as before.
+  if [ -f "$path" ] && declare -F agmsg_instance_alive >/dev/null 2>&1; then
+    local stored_owner
+    stored_owner="$(agmsg_pane_registry_owner "$team" "$name" 2>/dev/null || true)"
+    if [ -n "$stored_owner" ] && [ "$stored_owner" != "$owner" ] && agmsg_instance_alive "$stored_owner"; then
+      echo "agmsg pane: $team/$name pane registration is owned by live session $stored_owner; not overwriting" >&2
+      return 3
+    fi
+  fi
+
   registered_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   json="$(agmsg_pane_registry_json "$backend" "$addr" "$project" "$type" "$registered_at" "$socket" "$owner")" || return 1
 

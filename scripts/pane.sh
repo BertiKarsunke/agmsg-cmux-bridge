@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILL_DIR="${SKILL_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+source "$SCRIPT_DIR/lib/instance-id.sh"
 source "$SCRIPT_DIR/lib/pane.sh"
 source "$SCRIPT_DIR/lib/type-registry.sh"
 source "$SCRIPT_DIR/lib/resolve-project.sh"
@@ -29,8 +30,11 @@ cmd_register() {
   fi
 
   local team="$1" name="$2" type="${3:-}" project="${4:-$(pwd)}" owner="${5:-${AGMSG_PANE_OWNER:-}}"
-  if ! agmsg_pane_registry_write "$team" "$name" "$type" "$project" "$owner"; then
-    echo "agmsg pane: no active tmux/cmux pane detected; registration not written" >&2
+  local rc=0
+  agmsg_pane_registry_write "$team" "$name" "$type" "$project" "$owner" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # rc 3 = refused: a live session owns the registration (message already on stderr).
+    [ "$rc" -eq 3 ] || echo "agmsg pane: no active tmux/cmux pane detected; registration not written" >&2
     return 1
   fi
 
