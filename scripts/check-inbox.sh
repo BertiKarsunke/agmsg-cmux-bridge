@@ -15,6 +15,8 @@ source "$SCRIPT_DIR/lib/storage.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/role-session.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"  # agmsg_agent_pid, for instance-id derivation
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/type-registry.sh"
@@ -60,12 +62,14 @@ SESSION_ID=$(printf '%s' "$INPUT" \
   | sed -n 's/.*"sessionId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   | head -1)
 [ -z "$SESSION_ID" ] && SESSION_ID="${GROK_SESSION_ID:-}"
+ROLE_SESSION_ID=""
 if [ -n "$SESSION_ID" ]; then
   # The monitor watcher keys its pidfile (and its actas owner, below) on the
   # per-process instance id (#93), not the bare session_id. Normalize to the
   # same token so this Stop-hook defers to a live watcher in `both` mode instead
   # of double-delivering.
   SESSION_ID="$(agmsg_normalize_instance_id "$SESSION_ID" "$TYPE")"
+  ROLE_SESSION_ID="$(agmsg_instance_bare_sid "$SESSION_ID")"
   PIDFILE="$SKILL_DIR/run/watch.$SESSION_ID.pid"
   if [ -f "$PIDFILE" ]; then
     WATCH_PID=$(cat "$PIDFILE" 2>/dev/null || true)
@@ -81,6 +85,19 @@ if [ -z "$PAIRS" ]; then
   exit 0
 fi
 PAIR_AGENT_COUNT=$(printf '%s\n' "$PAIRS" | awk -F'\t' 'NF >= 2 && !seen[$2]++ { c++ } END { print c + 0 }')
+
+# Bind pane refresh and role-specific delivery to the role-session record for
+# this hook's bare session/thread id. A missing binding deliberately leaves the
+# pane set empty: join/actas/explicit pane register own initial registration.
+BOUND_PAIRS=""
+if [ -n "$ROLE_SESSION_ID" ]; then
+  while IFS=$'\t' read -r bound_team bound_agent; do
+    [ -n "$bound_team" ] || continue
+    [ -n "$bound_agent" ] || continue
+    [ "$(agmsg_role_session_uuid "$bound_team" "$bound_agent")" = "$ROLE_SESSION_ID" ] || continue
+    BOUND_PAIRS+="${bound_team}"$'\t'"${bound_agent}"$'\n'
+  done <<< "$PAIRS"
+fi
 
 # Cooldown check. The marker is hook runtime state, not message storage, so it
 # lives in the skill's run dir — independent of AGMSG_STORAGE_PATH. Keeping it
@@ -106,14 +123,12 @@ fi
 mkdir -p "$SKILL_DIR/run"
 touch "$MARKER"
 
-# Best-effort: keep this session's pane registration fresh so peers can
-# pane-push to the live surface. Turn-mode agents (codex, gemini, ...) only
-# register a pane at join/actas; without this a session that moved to a new
-# pane (restart, re-split) becomes unreachable by pane-push until it rejoins.
-# Runs once per delivery interval (after the cooldown gate), independent of
-# whether the message store exists or has new rows. No-op when pane-push is
-# disabled or no tmux/cmux/wezterm backend is present. Only refresh pairs this
-# session owns — skip roles an actas elsewhere has claimed.
+# Best-effort: refresh only the pane registration whose role-session record is
+# bound to this hook's session/thread. Never claim every identity in the
+# project, and do nothing when no binding exists. Runs once per delivery
+# interval (after the cooldown gate), independent of whether the message store
+# exists or has new rows. No-op when pane-push is disabled or no backend is
+# present. Also skip a bound role when an actas elsewhere has claimed it.
 if [ "${AGMSG_PANE_PUSH:-1}" != "0" ] \
    && declare -F agmsg_pane_registry_write >/dev/null 2>&1; then
   while IFS=$'\t' read -r pane_team pane_agent; do
@@ -123,7 +138,7 @@ if [ "${AGMSG_PANE_PUSH:-1}" != "0" ] \
       other:*) continue ;;
     esac
     agmsg_pane_registry_write "$pane_team" "$pane_agent" "$TYPE" "$PROJECT" "${SESSION_ID:-}" >/dev/null 2>&1 || true
-  done <<< "$PAIRS"
+  done <<< "$BOUND_PAIRS"
 fi
 
 # Check for unread messages and mark as read
@@ -134,6 +149,9 @@ OUTPUT=""
 agmsg_check_sql_quote() {
   printf '%s' "$1" | sed "s/'/''/g"
 }
+
+DELIVERY_PAIRS="$PAIRS"
+[ -n "$BOUND_PAIRS" ] && DELIVERY_PAIRS="$BOUND_PAIRS"
 
 while IFS=$'\t' read -r team agent; do
   [ -n "$team" ] || continue
@@ -175,7 +193,7 @@ while IFS=$'\t' read -r team agent; do
     # Mark as read
     agmsg_sqlite "$DB" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE team='$team_sql' AND to_agent='$agent_sql' AND read_at IS NULL;" 2>/dev/null || true
   fi
-done <<< "$PAIRS"
+done <<< "$DELIVERY_PAIRS"
 
 # No new messages
 if [ -z "$OUTPUT" ]; then

@@ -15,6 +15,7 @@ setup() {
   # its pidfile on the raw session_id it passes — deterministic in CI and when
   # the suite runs under an agent process.
   export AGMSG_AGENT_PID=""
+  export AGMSG_PANE_BACKEND=none
 }
 
 teardown() {
@@ -29,11 +30,28 @@ teardown() {
   # surface here, not just as a stat on a file.
   bash "$SK/scripts/join.sh" demo alice claude-code /tmp/install-projA
   bash "$SK/scripts/join.sh" demo bob   claude-code /tmp/install-projB
+  [ ! -e "$SK/run/pane.demo.bob.json" ]
   run bash "$SK/scripts/send.sh" demo alice bob "hello from install"
   [ "$status" -eq 0 ]
   run bash "$SK/scripts/inbox.sh" demo bob
   [ "$status" -eq 0 ]
   [[ "$output" =~ "hello from install" ]]
+}
+
+@test "install: codex default inbox does not auto-register another role's pane" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  [ -f "$SK/SKILL.md" ]
+
+  local default_block pane_block actas_block
+  default_block="$(sed -n '/\*\*If no arguments provided (DEFAULT action/,/If argument is "history"/p' "$SK/SKILL.md")"
+  pane_block="$(sed -n '/If argument starts with "pane"/,/If argument starts with "actas"/p' "$SK/SKILL.md")"
+  actas_block="$(sed -n '/If argument starts with "actas"/,/If argument starts with "drop"/p' "$SK/SKILL.md")"
+
+  [[ "$default_block" == *"inbox.sh"* ]]
+  [[ "$default_block" != *"pane.sh register"* ]]
+  [[ "$pane_block" == *"active AGENT"* ]]
+  [[ "$pane_block" == *"pane.sh register"* ]]
+  [[ "$actas_block" == *"pane.sh register <team> <name>"* ]]
 }
 
 @test "install: --update restores scripts/lib even if it went missing" {

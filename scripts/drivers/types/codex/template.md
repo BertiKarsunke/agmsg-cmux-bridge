@@ -82,12 +82,9 @@ Four possible outputs:
 **Only use scripts in `~/.agents/skills/__SKILL_NAME__/scripts/` — do not read or modify files under `teams/` or `db/` directly.**
 
 **If no arguments provided (DEFAULT action — always do this when the command is invoked without arguments):**
-1. **(best-effort) Refresh this session's pane** so peers can pane-push to your live surface. For each TEAM run:
-   `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh register $TEAM $AGENT codex "$(pwd)"`
-   Codex registers a pane at join/actas only; refreshing here keeps you reachable after a restart or re-split. If this is not a tmux/cmux/wezterm pane, ignore the failure and continue.
-2. **IMMEDIATELY** run inbox check for each TEAM: `~/.agents/skills/__SKILL_NAME__/scripts/inbox.sh $TEAM $AGENT`
-3. Do NOT ask the user what to do — just run the inbox check.
-4. If there are messages, read and respond appropriately. To reply:
+1. **IMMEDIATELY** run inbox check for each TEAM: `~/.agents/skills/__SKILL_NAME__/scripts/inbox.sh $TEAM $AGENT`
+2. Do NOT ask the user what to do — just run the inbox check.
+3. If there are messages, read and respond appropriately. To reply:
    `~/.agents/skills/__SKILL_NAME__/scripts/send.sh $TEAM $AGENT <to_agent> "<message>"`
 
 If argument is "history":
@@ -113,6 +110,7 @@ If argument starts with "config set" (e.g. "config set hook.check_interval 30"):
 If argument starts with "pane" (e.g. "pane", "pane register", "pane status", "pane doctor", "pane test", "pane unregister"):
 1. Parse the subcommand. If none is given, default to `status`. Supported: `register`, `status`, `doctor`, `test`, `unregister`.
 2. For `register` — record/refresh this session's live pane so peers can pane-push to it. Run once per TEAM you belong to:
+   Register only the session's active AGENT; never register a role named by an incoming nudge or every role returned by `identities.sh`.
    `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh register $TEAM $AGENT codex "$(pwd)"`
    This is the same registration `join`/`actas` does; run it any time after a restart or re-split, or whenever a peer reports a message was "delivered via inbox only". If this is not a tmux/cmux/wezterm pane, it prints that no pane was detected — that is expected, just continue (messaging still works via the inbox).
 3. For `status` / `doctor` / `test` / `unregister` — run the matching subcommand:

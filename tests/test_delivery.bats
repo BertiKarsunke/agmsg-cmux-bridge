@@ -890,29 +890,59 @@ EOF
   [[ "$output" =~ "ping copilot" ]]
 }
 
-@test "check-inbox: refreshes this session's pane registration (turn-mode push)" {
-  bash "$SCRIPTS/join.sh" testteam alice codex "$TEST_PROJECT"
-  # Simulate the pane moving (restart / re-split): drop the registration join wrote.
-  bash "$SCRIPTS/pane.sh" unregister testteam alice >/dev/null 2>&1 || true
-  run bash "$SCRIPTS/pane.sh" lookup testteam alice
-  [ "$status" -ne 0 ]
-
+@test "check-inbox: bound codex role alone refreshes its pane and receives its inbox" {
+  bash "$SCRIPTS/join.sh" testteam scout codex "$TEST_PROJECT"
+  bash "$SCRIPTS/join.sh" testteam executor codex "$TEST_PROJECT"
+  env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%7 \
+    bash "$SCRIPTS/pane.sh" register testteam scout codex "$TEST_PROJECT"
+  bash "$SCRIPTS/pane.sh" unregister testteam executor >/dev/null 2>&1 || true
+  _seed_role_record testteam executor "sid-executor" "$TEST_PROJECT" codex
   bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
-  # Stop hook runs with a live pane backend in the session's env.
-  echo '{}' | env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
-    bash "$SCRIPTS/check-inbox.sh" codex "$TEST_PROJECT" >/dev/null
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" testteam sender scout "for scout"
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" testteam sender executor "for executor"
 
-  run bash "$SCRIPTS/pane.sh" lookup testteam alice
+  run bash -c "echo '{\"session_id\":\"sid-executor\"}' | env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash '$SCRIPTS/check-inbox.sh' codex '$TEST_PROJECT'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"for executor"* ]]
+  [[ "$output" != *"for scout"* ]]
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam executor
   [ "$status" -eq 0 ]
   [ "$output" = $'tmux\t%9\t'"$TEST_PROJECT"$'\tcodex\t' ]
+  [ "$(sqlite_mem "SELECT json_extract(readfile('$(rf "$TEST_SKILL_DIR/run/pane.testteam.executor.json")'), '\$.owner');")" = "sid-executor" ]
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam scout
+  [ "$status" -eq 0 ]
+  [ "$output" = $'tmux\t%7\t'"$TEST_PROJECT"$'\tcodex\t' ]
 }
 
-@test "check-inbox: AGMSG_PANE_PUSH=0 leaves pane unregistered" {
+@test "check-inbox: no role binding skips pane refresh but checks every identity" {
+  bash "$SCRIPTS/join.sh" testteam scout codex "$TEST_PROJECT"
+  bash "$SCRIPTS/join.sh" testteam executor codex "$TEST_PROJECT"
+  bash "$SCRIPTS/pane.sh" unregister testteam scout >/dev/null 2>&1 || true
+  bash "$SCRIPTS/pane.sh" unregister testteam executor >/dev/null 2>&1 || true
+  bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" testteam sender scout "unbound scout"
+  AGMSG_PANE_PUSH=0 bash "$SCRIPTS/send.sh" testteam sender executor "unbound executor"
+
+  run bash -c "echo '{\"session_id\":\"sid-unbound\"}' | env AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash '$SCRIPTS/check-inbox.sh' codex '$TEST_PROJECT'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unbound scout"* ]]
+  [[ "$output" == *"unbound executor"* ]]
+
+  run bash "$SCRIPTS/pane.sh" lookup testteam scout
+  [ "$status" -ne 0 ]
+  run bash "$SCRIPTS/pane.sh" lookup testteam executor
+  [ "$status" -ne 0 ]
+}
+
+@test "check-inbox: AGMSG_PANE_PUSH=0 leaves a bound role unregistered" {
   bash "$SCRIPTS/join.sh" testteam alice codex "$TEST_PROJECT"
   bash "$SCRIPTS/pane.sh" unregister testteam alice >/dev/null 2>&1 || true
+  _seed_role_record testteam alice "sid-alice" "$TEST_PROJECT" codex
   bash "$SCRIPTS/config.sh" set delivery.turn.check_interval 0 >/dev/null
 
-  echo '{}' | env AGMSG_PANE_PUSH=0 AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
+  echo '{"session_id":"sid-alice"}' | env AGMSG_PANE_PUSH=0 AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 \
     bash "$SCRIPTS/check-inbox.sh" codex "$TEST_PROJECT" >/dev/null
 
   run bash "$SCRIPTS/pane.sh" lookup testteam alice
