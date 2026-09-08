@@ -375,45 +375,75 @@ cmd_test() {
     return 0
   fi
 
-  local db token body id team_sql name_sql body_sql elapsed read_at
-  db="$(agmsg_db_path)"
-  [ -f "$db" ] || bash "$SCRIPT_DIR/internal/init-db.sh" >/dev/null
+  local token body id elapsed probe_rc
+  if ! agmsg_storage_load; then
+    printf 'status=error team=%s name=%s reason=probe-storage-load\n' "$team" "$name" >&2
+    return 1
+  fi
   token="$(date +%s).$$.${RANDOM:-0}"
   body="ctrl:ping $token"
-  team_sql="$(printf '%s' "$team" | sed "s/'/''/g")"
-  name_sql="$(printf '%s' "$name" | sed "s/'/''/g")"
-  body_sql="$(printf '%s' "$body" | sed "s/'/''/g")"
-  id="$(agmsg_sqlite "$db" "
-    INSERT INTO messages (team, from_agent, to_agent, body)
-    VALUES ('$team_sql', '__pane_test__', '$name_sql', '$body_sql');
-    SELECT last_insert_rowid();
-  " | tail -1 | tr -d '\r')"
-  case "$id" in
-    ''|*[!0-9]*)
-      echo "agmsg pane: failed to create ping message" >&2
-      return 1
-      ;;
-  esac
+  if ! id="$(storage_send "$team" __pane_test__ "$name" "$body")" || [ -z "$id" ]; then
+    printf 'status=error team=%s name=%s reason=probe-send-failed\n' "$team" "$name" >&2
+    return 1
+  fi
+
+  pane_ping_is_unread() {
+    # Return 0 when the exact diagnostic message is still unread, 1 once it is
+    # absent (consumed), and 2 for a storage/JSON probe failure. Never use the
+    # driver's default limit: an older backlog must not hide this fresh ping.
+    local unread json_array json_valid match sq="'"
+    if ! unread="$(storage_list_unread "$team" "$name")"; then
+      return 2
+    fi
+    [ -n "$unread" ] || return 1
+    json_array="[$(printf '%s' "$unread" | paste -sd, -)]"
+    if ! json_valid="$(agmsg_sqlite ':memory:' \
+      "SELECT json_valid('${json_array//$sq/$sq$sq}');" 2>/dev/null)" \
+      || [ "$json_valid" != "1" ]; then
+      return 2
+    fi
+    if ! match="$(agmsg_sqlite ':memory:' "
+      SELECT EXISTS(
+        SELECT 1 FROM json_each('${json_array//$sq/$sq$sq}')
+        WHERE json_extract(value, '\$.id') = '${id//$sq/$sq$sq}'
+          AND json_extract(value, '\$.body') = '${body//$sq/$sq$sq}'
+      );
+    " 2>/dev/null)"; then
+      return 2
+    fi
+    [ "$match" = "1" ]
+  }
 
   if ! agmsg_pane_inject "$backend" "$addr" "[agmsg-cmux] pane diagnostic ping for $team/$name. Run your agmsg skill to read the inbox; no reply needed." "$socket"; then
-    agmsg_sqlite "$db" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=$id;" >/dev/null 2>&1 || true
+    storage_mark_read_batch "$team" "$name" "$id" >/dev/null 2>&1 || true
     echo "agmsg pane: failed to nudge registered pane: $backend $addr" >&2
     return 1
   fi
 
   elapsed=0
   while :; do
-    read_at="$(agmsg_sqlite "$db" "SELECT COALESCE(read_at, '') FROM messages WHERE id=$id;" 2>/dev/null | tr -d '\r' || true)"
-    if [ -n "$read_at" ]; then
+    probe_rc=0
+    pane_ping_is_unread || probe_rc=$?
+    if [ "$probe_rc" -eq 1 ]; then
       printf 'status=responsive team=%s name=%s after=%ss message_id=%s\n' "$team" "$name" "$elapsed" "$id"
       return 0
+    fi
+    if [ "$probe_rc" -ne 0 ]; then
+      storage_mark_read_batch "$team" "$name" "$id" >/dev/null 2>&1 || true
+      printf 'status=error team=%s name=%s reason=probe-read-failed message_id=%s\n' \
+        "$team" "$name" "$id" >&2
+      return 1
     fi
     [ "$elapsed" -ge "$timeout" ] && break
     sleep 1
     elapsed=$((elapsed + 1))
   done
 
-  agmsg_sqlite "$db" "UPDATE messages SET read_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=$id AND read_at IS NULL;" >/dev/null 2>&1 || true
+  if ! storage_mark_read_batch "$team" "$name" "$id" >/dev/null 2>&1; then
+    printf 'status=error team=%s name=%s reason=probe-cleanup-failed message_id=%s\n' \
+      "$team" "$name" "$id" >&2
+    return 1
+  fi
   printf 'status=unresponsive team=%s name=%s reason=ping-timeout timeout=%ss message_id=%s\n' "$team" "$name" "$timeout" "$id"
 }
 

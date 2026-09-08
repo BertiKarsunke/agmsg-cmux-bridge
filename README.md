@@ -199,8 +199,8 @@ How incoming messages reach your agent. Pick one at first join via the prompt, o
 
 | mode | mechanism | latency | who it's for |
 |---|---|---|---|
-| **`monitor`** (default on Claude Code) | SessionStart hook → Monitor tool → blocking SQLite stream | ~5s | Claude Code users wanting real-time push |
-| **`turn`** (default on Codex / Copilot CLI / OpenCode) | Stop hook fires `check-inbox.sh` between assistant turns | until your next interaction | Codex / Copilot CLI / OpenCode (no Monitor tool); Claude Code users on a quieter loop |
+| **`monitor`** (default on Claude Code; on OpenCode with the opencode-sentinel plugin) | SessionStart hook → Monitor tool → blocking SQLite stream | ~5s | Claude Code users wanting real-time push |
+| **`turn`** (default on Codex / Copilot CLI / OpenCode without the plugin) | Stop hook fires `check-inbox.sh` between assistant turns | until your next interaction | Codex / Copilot CLI / OpenCode users not running monitor; Claude Code users on a quieter loop |
 | **`both`** | monitor primary, turn as per-session safety net | ~5s; falls back to turn-end on watcher failure | belt-and-suspenders |
 | **`off`** | no automatic delivery | manual `/agmsg` only | minimalists |
 
@@ -254,11 +254,11 @@ The command updates `db/config.yaml`, rewrites the project's hook entries, and p
 $agmsg                          — or /skills → agmsg
 ```
 
-Codex supports `mode monitor` as a **beta** app-server bridge, plus `mode turn` and `mode off`.
+Codex supports `mode monitor` through an app-server bridge, plus `mode turn` and `mode off`.
 
 Codex's default no-argument `$agmsg` action is inbox-only: it does not automatically register a pane from an incoming nudge. Pane registration happens when `actas <name>` explicitly switches roles, or when `pane register` is explicitly run for the session's active AGENT; never register every identity or a role merely named by a nudge.
 
-> ⚠️ **The monitor beta changes how Codex starts — opt in only if you understand it.** Codex has no Monitor tool, so `mode monitor` prints a shell function that makes `codex` route through agmsg's monitor shim in your interactive shell. In monitor-mode projects the shim routes interactive launches through a bridge that turns incoming agmsg messages into turns on the current Codex thread; `codex exec` and non-monitor projects pass straight through to the real Codex. It depends on experimental Codex app-server behavior and has known rough edges (orphans on TUI close — #149; one identity per project — #150).
+> ⚠️ **Monitor mode changes how Codex starts — enable it knowing that.** Codex has no Monitor tool, so `mode monitor` prints a shell function that makes `codex` route through agmsg's monitor shim in your interactive shell. In monitor-mode projects the shim routes interactive launches through a bridge that turns incoming agmsg messages into turns on the current Codex thread; `codex exec` and non-monitor projects pass straight through to the real Codex. It depends on Codex app-server behavior and has a known limitation (orphans on TUI close — #149).
 
 If you prefer a global PATH shim, run `~/.agents/skills/<cmd>/scripts/drivers/types/codex/codex-shim-install.sh install` and put `~/.agents/bin` before the real Codex binary on PATH. You can also launch with `~/.agents/skills/<cmd>/scripts/drivers/types/codex/codex-monitor.sh`. Codex sandboxing must allow writes to the skill's `db/`, `teams/`, and `run/` dirs — `install.sh` configures those `writable_roots` when `~/.codex/config.toml` exists. Setup notes and internals: [docs/codex-monitor-beta.md](docs/codex-monitor-beta.md).
 
@@ -276,7 +276,7 @@ The Copilot installer drops a `SKILL.md` at `~/.copilot/skills/agmsg/` so `/agms
 $agmsg
 ```
 
-Install with `./install.sh` (when `~/.config/opencode/` exists, the OpenCode-typed skill is placed automatically alongside the default Codex-typed shared skill). Use `--agent-type opencode` only for OpenCode-only environments where Codex is not installed. OpenCode is supported for manual and turn/off delivery workflows. It currently supports `mode turn` and `mode off`; `monitor`, `both`, and `spawn opencode` are not supported.
+Install with `./install.sh` (when `~/.config/opencode/` exists, the OpenCode-typed skill is placed automatically alongside the default Codex-typed shared skill). Use `--agent-type opencode` only for OpenCode-only environments where Codex is not installed. OpenCode supports `mode monitor` (via the external [`opencode-sentinel`](https://github.com/tsukimiya/opencode-sentinel) plugin; without it the rule instructs a fallback to turn mode, which the agent follows rather than agmsg enforcing it), `mode turn`, and `mode off`. `spawn opencode` is available via `opencode --prompt` (TUI mode, which stays resident after the boot prompt's turn). `both` is not supported.
 
 This makes OpenCode useful as a local coding agent, including configurations backed by local providers such as Ollama.
 
@@ -285,7 +285,7 @@ See [docs/opencode.md](docs/opencode.md) for full setup instructions.
 ### Shell (any agent)
 
 ```bash
-~/.agents/skills/<cmd>/scripts/send.sh <team> <from> <to> "<message>"
+~/.agents/skills/<cmd>/scripts/send.sh <team> <from> <to> "<message>" [--force]
 ~/.agents/skills/<cmd>/scripts/inbox.sh <team> <agent_id>
 ~/.agents/skills/<cmd>/scripts/history.sh <team> [agent_id] [limit]
 ~/.agents/skills/<cmd>/scripts/team.sh <team>
@@ -295,7 +295,7 @@ See [docs/opencode.md](docs/opencode.md) for full setup instructions.
 ~/.agents/skills/<cmd>/scripts/reset.sh <project_path> <type> [agent_id]
 ```
 
-`send.sh` takes exactly four positional arguments: `<team> <from> <to> "<message>"`. Quote the message so the shell sees it as one argument; an unquoted message with spaces will be misparsed.
+`send.sh` takes four positional arguments — `<team> <from> <to> "<message>"` — plus an optional trailing `--force`. Quote the message so the shell sees it as one argument; an unquoted message with spaces will be misparsed. Both `from` and `to` must already be registered in `<team>`; an unregistered name errors out (listing the currently registered names) instead of silently storing an undeliverable message. Pass `--force` to bypass this check for an intentional pre-registration send.
 
 ## FAQ / Design notes
 
@@ -338,6 +338,10 @@ Yes. Messages live in SQLite and survive sessions. `history.sh <team>` replays t
 **Can I re-seed a fresh agent from an old room?**
 
 The message store is effectively a replay log. There's no one-shot "rehydrate from room X" command yet, but `history.sh` gives you the transcript and you can prompt a new agent with it. Treat persistence as the unlock that makes that possible.
+
+**How do you pronounce it?**
+
+"AG message" (ay-jee message), or spelled out as A-G-M-S-G. Either is fine.
 
 ## Update
 
@@ -436,6 +440,8 @@ Claude Code's sandbox restricts filesystem writes to the project directory. In `
   }
 }
 ```
+
+The allowlist does not enable sandboxing by itself. Use `/sandbox` in Claude Code to choose a sandbox mode, or add `"enabled": true` alongside `"filesystem"` under `"sandbox"` to configure it in settings. The allowlist has no effect until sandboxing is enabled.
 
 This can also go in project-level `.claude/settings.local.json` if you prefer per-project scope. The allowlist merges across all settings scopes and takes effect immediately — no restart needed.
 
@@ -553,6 +559,30 @@ a GUI app, a bot, a derivative project (`agmsg-shogi`, `agmsg-go`,
 to change), and write through the existing scripts (`send.sh`, `join.sh`,
 …) rather than the database. Full guidance:
 [docs/building-on-agmsg.md](docs/building-on-agmsg.md).
+
+## Community
+
+- **Product Hunt**: #5 Product of the Day, [2026-06-09 launch](https://www.producthunt.com/products/agmsg) — 219 upvotes, 39 comments
+- **Community projects** (also on the [showcase](https://agmsg.cc)): [`agkanban`](https://github.com/lucianlamp/agkanban) — multi-agent kanban board that pairs with agmsg; [`agmsg-office`](https://github.com/shinshin86/agmsg-office) — replays message logs as characters speaking on a stage; [`agmsg-viewer`](https://github.com/utenadev/agmsg-viewer) — message history in a chat interface in the browser; [`agmsg-bubblelog`](https://github.com/dreiachse-cyber/agmsg-bubblelog) — replays a team's log locally as a messenger-style thread; [`agmsg-tui`](https://github.com/rrrrnmtsu/agmsg-tui) — Rust/ratatui terminal client, friendly to SSH, mosh, and tmux
+- **External contributors**: [@MiuraKatsu](https://github.com/MiuraKatsu) (Gemini support + whoami auto-detect), [@roundrop](https://github.com/roundrop) (Copilot CLI support), [@TOMONOSUKEJP](https://github.com/TOMONOSUKEJP) (native Windows / Git Bash), [@kenshin-yamada](https://github.com/kenshin-yamada) (watcher scoping fix), [@utenadev](https://github.com/utenadev) (OpenCode contribution), [@lucianlamp](https://github.com/lucianlamp) (native Windows PowerShell helpers), [@tatsuya6502](https://github.com/tatsuya6502) (sandboxed Bash tool support), [@Masashi-Ono0611](https://github.com/Masashi-Ono0611) (project-path validation, watchdog and watcher fixes), [@chemica-tan](https://github.com/chemica-tan) (Windows codex bridge: project compare and port parsing), [@otsune](https://github.com/otsune) (Git Bash quoting from PowerShell), [@tsukimiya](https://github.com/tsukimiya) (OpenCode: resident spawn and monitor delivery)
+
+## Project site (agmsg.cc)
+
+[agmsg.cc](https://agmsg.cc) is an Astro project under [`site/`](site/).
+
+- **Source of truth:** `site/` (Astro + Tailwind). The built output is **not** committed — CI builds it.
+- **Local preview:**
+  ```bash
+  cd site
+  npm install
+  npm run dev        # http://localhost:4321, live reload
+  # or, to serve the production build:
+  npm run build && npm run preview
+  ```
+- **Publish:** pushing to `main` with changes under `site/` runs [`.github/workflows/pages.yml`](.github/workflows/pages.yml), which builds the site and deploys it to GitHub Pages. The custom domain is set by `site/public/CNAME`.
+- The agent-types gallery is generated at build time from `scripts/drivers/types/*/type.conf`, so adding an agent type surfaces it on the site automatically.
+
+`docs/` is developer documentation (markdown, ADRs, spec) read on GitHub — it is **not** the published site.
 
 ## Contributing
 

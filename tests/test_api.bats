@@ -75,6 +75,13 @@ json_valid_line() {
   [ -z "$output" ]
 }
 
+@test "api: rejects a team name with path traversal (../) before it reaches the filesystem (#87 cluster)" {
+  run bash "$SCRIPTS/api.sh" get teams "../../escape-api" members
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "path traversal" ]]
+  [ ! -f "$(dirname "$TEST_SKILL_DIR")/escape-api/config.json" ]
+}
+
 # --- get teams <team> messages ---
 
 @test "api: get teams <team> messages returns sent messages oldest-first" {
@@ -95,7 +102,7 @@ json_valid_line() {
   run bash "$SCRIPTS/api.sh" get teams testteam messages
   [ "$status" -eq 0 ]
   # json_type() reports "text" for a JSON string field, "integer" for a bare
-  # number — this is the regression aggie-co1's review caught (#289): ids
+  # number — this is the regression caught in review (#289): ids
   # must stay opaque strings, not JSON numbers, to match the driver
   # interface's legacy-id contract.
   [ "$(sqlite_mem "SELECT json_type('$output', '\$.id');")" = "text" ]

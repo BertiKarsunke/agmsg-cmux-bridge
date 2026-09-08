@@ -72,6 +72,12 @@ EOF
       ;;
     monitor)
       mkdir -p "$(dirname "$rule_file")"
+      # The watch.sh command below passes "${GROK_SESSION_ID:--}" (sentinel `-`),
+      # NOT "$GROK_SESSION_ID": Grok's monitor tool re-evaluates the command
+      # line, and a quoted-but-empty expansion is dropped entirely there —
+      # shifting project/type/name one slot left and leaving the watcher
+      # subscribed to nothing. `-` survives the re-eval as a real argument and
+      # watch.sh folds it into its empty-session-id resolution path.
       cat <<EOF > "$rule_file"
 <!-- agmsg-delivery-mode: monitor -->
 # agmsg — keep a real-time inbox watcher running
@@ -100,7 +106,7 @@ it once:
 2. Start the watcher with the \`monitor\` tool (that exact tool — not
    \`run_terminal_command\`), persistent, so each new message streams into the
    conversation as a notification. Pass these three fields verbatim:
-   - command: \`$SKILL_DIR/scripts/watch.sh "\$GROK_SESSION_ID" '$project' $type\`
+   - command: \`$SKILL_DIR/scripts/watch.sh "\${GROK_SESSION_ID:--}" '$project' $type\`
    - description: \`agmsg inbox stream\`
    - persistent: true
    Use the command EXACTLY as written. Do NOT append \`| head\`, \`| tail\`, any
@@ -174,10 +180,12 @@ _agmsg_grok_emit_monitor_directive() {
 
   # Bake GROK_SESSION_ID in when it is set here, so the agent does not invent a
   # value and cleanup can find the pidfile. NOTE: Grok does NOT reliably export
-  # GROK_SESSION_ID into the `monitor` tool's own shell — the rule's literal
-  # "$GROK_SESSION_ID" can expand to empty there — so watch.sh self-generates a
-  # fallback id when its first arg is empty rather than failing. This directive
-  # path still bakes the real id when delivery.sh runs with it in the env.
+  # GROK_SESSION_ID into the `monitor` tool's own shell — that is why the rule
+  # passes "${GROK_SESSION_ID:--}": when unset it resolves to the sentinel `-`,
+  # which watch.sh folds into its empty-arg path and self-generates a fallback
+  # id rather than failing (a bare empty "" would be dropped by the re-eval and
+  # shift the remaining arguments). This directive path still bakes the real id
+  # when delivery.sh runs with it in the env.
   local session_id="${GROK_SESSION_ID:-}"
   if [ -z "$session_id" ]; then
     session_id="agmsg-$(compat_uuidgen | tr 'A-Z' 'a-z')"
@@ -188,7 +196,9 @@ _agmsg_grok_emit_monitor_directive() {
   if [ -f "$pidfile" ]; then
     local existing
     existing=$(cat "$pidfile" 2>/dev/null || true)
-    if [ -n "$existing" ] && kill -0 "$existing" 2>/dev/null; then
+    # _agmsg_pid_alive_local, mirroring delivery.sh emit dedup: the recorded pid is
+    # watch.sh's own $$, which tasklist cannot see (#567).
+    if [ -n "$existing" ] && _agmsg_pid_alive_local "$existing"; then
       cat <<EOF
 
 A watch.sh is already streaming into this session (pid $existing). No

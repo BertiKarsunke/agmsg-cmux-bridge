@@ -244,6 +244,55 @@ _install_fake_herdr() {
   [[ "$output" =~ "reason=ping-timeout" ]]
 }
 
+@test "pane: test scans the full unread backlog before deciding the ping was consumed" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
+
+  SKILL_DIR="$TEST_SKILL_DIR" bash -c '
+    source "$1/lib/storage.sh"
+    agmsg_storage_load
+    i=0
+    while [ "$i" -lt 130 ]; do
+      storage_send opus48 sender executor "backlog-$i" >/dev/null
+      i=$((i + 1))
+    done
+  ' _ "$SCRIPTS"
+
+  run env AGMSG_PANE_COMMIT_DELAY=0 bash "$SCRIPTS/pane.sh" test --timeout 0 opus48 executor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "status=unresponsive" ]]
+  [[ "$output" =~ "reason=ping-timeout" ]]
+}
+
+@test "pane: test uses the selected JSONL storage driver" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
+
+  run env AGMSG_STORAGE_DRIVER=jsonl AGMSG_PANE_COMMIT_DELAY=0 \
+    bash "$SCRIPTS/pane.sh" test --timeout 0 opus48 executor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "status=unresponsive" ]]
+  [[ "$output" =~ "reason=ping-timeout" ]]
+  run env AGMSG_STORAGE_DRIVER=jsonl SKILL_DIR="$TEST_SKILL_DIR" bash -c '
+    source "$1/lib/storage.sh"
+    agmsg_storage_load
+    storage_store_exists opus48
+  ' _ "$SCRIPTS"
+  [ "$status" -eq 0 ]
+}
+
+@test "pane: test reports a probe error when the storage driver cannot load" {
+  _install_fake_tmux
+  AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%9 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
+
+  run env AGMSG_STORAGE_DRIVER=does-not-exist AGMSG_PANE_COMMIT_DELAY=0 \
+    bash "$SCRIPTS/pane.sh" test --timeout 0 opus48 executor
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "status=error" ]]
+  [[ "$output" =~ "reason=probe-storage-load" ]]
+  [[ "$output" != *"status=responsive"* ]]
+}
+
 @test "pane: test reports unresponsive when registered pane is gone" {
   _install_fake_tmux
   AGMSG_PANE_BACKEND=tmux AGMSG_PANE_SELF=%10 bash "$SCRIPTS/pane.sh" register opus48 executor codex /tmp/x owner-a >/dev/null
