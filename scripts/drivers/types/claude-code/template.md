@@ -6,17 +6,21 @@ Agent messaging command. **IMPORTANT: Always use the provided scripts. NEVER dir
 
 ## Identity
 
-If you already know your AGENT and TEAMS from a previous `/__SKILL_NAME__` call in this session, skip to **Execute** below.
+If you already know your AGENT and TEAMS from a previous `/__SKILL_NAME__` call in this session, skip to **Execute** below unless the user explicitly names a different team now; the current explicit team always wins.
 
-Otherwise, run: `~/.agents/skills/__SKILL_NAME__/scripts/whoami.sh "$(pwd)" claude-code`
+Otherwise, run: `~/.agents/skills/__SKILL_NAME__/scripts/whoami.sh "$(pwd)" claude-code`. If the user explicitly chose a team, or this session already remembers one, append `--team <team>`.
 
-Four possible outputs:
+Five possible outputs:
 
 **A) Single identity:**
 `agent=<name> teams=<t1,t2,...> type=claude-code project=<path>`
 → Remember AGENT and TEAMS, then go to **Execute**.
 
-**B) Multiple identities:**
+**B) Selection required:**
+`selection_required=true reason=<reason> candidate_agents=<...> candidate_teams=<...> ... [selected_team=<team>]`
+→ Stored registrations are candidates, not this session's identity. Do not read any inbox. Keep `selected_team` when present; otherwise ask for a team, then ask for an agent unless the user already named one. Verify the chosen team-agent pair against `identities.sh "$(pwd)" claude-code` (its tab-separated rows are authoritative; never combine the separate candidate CSVs by position), then run the `actas` flow.
+
+**Legacy multiple identities:**
 `multiple=true agents=<n1,n2,...> teams=<t1,t2,...> type=claude-code project=<path>`
 → Ask the user which agent name to use for this session, then go to **Execute**.
 
@@ -24,13 +28,15 @@ Four possible outputs:
 `not_joined=true available_teams=<t1,t2,...>` (or `available_teams=none`)
 → Show the user the available teams from the output, then:
 
+  If the output includes `selected_team=<team>`, use that team and do not ask for a team name; ask only for the missing agent name. The project-basename default must not be replaced by an older suggested registration.
+
   > **First-time setup required.**
   > Joining a team so this agent can send and receive messages.
   > - **Team name**: a group of agents that can message each other (available: <list from output>)
   > - **Agent name**: this agent's identity within the team
 
-  1. Ask: "Enter a team name (joins existing or creates new)"
-  2. Ask: "Enter a name for this agent"
+  1. If no `selected_team` was returned, ask: "Enter a team name (joins existing or creates new)"
+  2. If the user has not already named the role, ask: "Enter a name for this agent"
   3. **You MUST use join.sh** — run: `~/.agents/skills/__SKILL_NAME__/scripts/join.sh <team> <agent_name> claude-code "$(pwd)"`
   4. Show the result and explain:
 

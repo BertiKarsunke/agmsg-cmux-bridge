@@ -55,7 +55,10 @@ turn, check your agmsg inbox so you never miss a teammate's message.
 
 1. Identify yourself (once per session is enough):
    \`$SKILL_DIR/scripts/whoami.sh '$project' $type\`
-   It prints your \`agent=\` name and \`teams=\` list.
+   Continue only when it prints a bound \`agent=\` name and \`teams=\` list.
+   If it prints \`selection_required=true\`, stop before reading any inbox and
+   ask the user to select a team/role with \`agmsg actas\`. Stored registrations
+   are candidates, not the current session's identity.
 2. For each team, show and consume unread messages:
    \`$SKILL_DIR/scripts/inbox.sh <team> <your-agent-name>\`
    This prints unread messages AND marks them read in the same call, so nothing
@@ -90,7 +93,10 @@ it once:
 
 1. Identify yourself if you have not already:
    \`$SKILL_DIR/scripts/whoami.sh '$project' $type\`
-   It prints your \`agent=\` name and \`teams=\` list.
+   Continue only when it prints a bound \`agent=\` name and \`teams=\` list.
+   If it prints \`selection_required=true\`, do not start a watcher or consume
+   any inbox. Ask the user to select a team/role with \`agmsg actas\` first;
+   stored registrations alone are not the current session's identity.
 2. Start the watcher with the \`monitor\` tool (that exact tool — not
    \`run_terminal_command\`), persistent, so each new message streams into the
    conversation as a notification. Pass these three fields verbatim:

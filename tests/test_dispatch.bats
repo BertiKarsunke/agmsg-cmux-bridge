@@ -28,10 +28,11 @@ teardown() {
   [[ "$output" =~ "No new messages." ]]
 }
 
-@test "dispatch: whoami single identity resolves inbox" {
+@test "dispatch: unbound single registration stops without choosing" {
   run bash "$SCRIPTS/windows/dispatch.sh" --type codex --project "$PROJECT_ALICE" -- inbox
-  [ "$status" -eq 0 ]
-  [[ "$output" =~ "No new messages." ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "agmsg -Team <team> -Agent <agent> inbox" ]]
 }
 
 @test "dispatch: multiple identity stops without choosing" {
@@ -40,7 +41,7 @@ teardown() {
 
   run bash "$SCRIPTS/windows/dispatch.sh" --type codex --project "$PROJECT_MULTI" -- inbox
   [ "$status" -eq 2 ]
-  [[ "$output" =~ "multiple=true" ]]
+  [[ "$output" =~ "selection_required=true" ]]
   [[ "$output" =~ "agmsg -Team <team> -Agent <agent> inbox" ]]
 }
 

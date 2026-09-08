@@ -124,7 +124,11 @@ reg() {
 
 @test "whoami: subdir invocation resolves to the registered identity" {
   reg T alice "$ROOT"
-  run bash "$SKILL_DIR/scripts/whoami.sh" "$ROOT/sub/deep" claude-code
+  SKILL_DIR="$SKILL_DIR" bash -c '
+    source "$SKILL_DIR/scripts/lib/role-session.sh"
+    agmsg_role_session_record T alice sid-root "$1" claude-code
+  ' _ "$ROOT"
+  CLAUDE_CODE_SESSION_ID=sid-root run bash "$SKILL_DIR/scripts/whoami.sh" "$ROOT/sub/deep" claude-code
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=alice" ]]
   [[ "$output" =~ "project=$ROOT" ]]

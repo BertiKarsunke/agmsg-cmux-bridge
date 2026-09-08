@@ -1,0 +1,4 @@
+codex:
+  -c: model_reasoning_effort="high"
+  --sandbox: workspace-write
+  --ask-for-approval: on-request

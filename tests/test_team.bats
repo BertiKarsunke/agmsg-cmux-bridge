@@ -146,19 +146,44 @@ teardown() {
 
 # --- whoami.sh ---
 
+record_whoami_binding() {
+  local team="$1" agent="$2" sid="$3" project="$4" type="$5"
+  SKILL_DIR="$TEST_SKILL_DIR" bash -c '
+    source "$SKILL_DIR/scripts/lib/role-session.sh"
+    agmsg_role_session_record "$1" "$2" "$3" "$4" "$5"
+  ' _ "$team" "$agent" "$sid" "$project" "$type"
+}
+
 @test "whoami: returns agent identity" {
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj
-  run bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
+  record_whoami_binding myteam alice session-1 /tmp/proj claude-code
+  CLAUDE_CODE_SESSION_ID=session-1 run bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=alice" ]]
   [[ "$output" =~ "teams=myteam" ]]
+}
+
+@test "whoami: a stored registration without a session binding is only a candidate" {
+  local project="$TEST_SKILL_DIR/myteam"
+  mkdir -p "$project"
+  bash "$SCRIPTS/join.sh" myteam alice claude-code "$project"
+  run env -u CLAUDE_CODE_SESSION_ID bash "$SCRIPTS/whoami.sh" "$project" claude-code
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "reason=project_team_requires_agent" ]]
+  [[ "$output" =~ "candidate_agents=alice" ]]
+  [[ "$output" =~ "candidate_teams=myteam" ]]
+  [[ "$output" =~ "selected_team=myteam" ]]
+  [[ "$output" =~ "team_source=project" ]]
+  [[ ! "$output" =~ "agent=alice" ]]
 }
 
 @test "whoami: resolves project paths containing single quotes" {
   local project="$TEST_SKILL_DIR/pro'j"
   mkdir -p "$project/subdir"
   bash "$SCRIPTS/join.sh" myteam alice claude-code "$project"
-  run bash "$SCRIPTS/whoami.sh" "$project/subdir" claude-code
+  record_whoami_binding myteam alice quote-session "$project" claude-code
+  CLAUDE_CODE_SESSION_ID=quote-session run bash "$SCRIPTS/whoami.sh" "$project/subdir" claude-code
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=alice" ]]
   [[ "$output" =~ "teams=myteam" ]]
@@ -171,7 +196,8 @@ teardown() {
   local team="O'Brien"
   local agent="al'ice"
   bash "$SCRIPTS/join.sh" "$team" "$agent" claude-code /tmp/proj
-  run bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
+  record_whoami_binding "$team" "$agent" quote-session /tmp/proj claude-code
+  CLAUDE_CODE_SESSION_ID=quote-session run bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=$agent" ]]
   [[ "$output" =~ "teams=$team" ]]
@@ -192,16 +218,149 @@ teardown() {
   run bash "$SCRIPTS/whoami.sh" /tmp/unknown claude-code
   [ "$status" -eq 0 ]
   [[ "$output" =~ "not_joined=true" ]]
+  [[ "$output" =~ "selected_team=unknown" ]]
+  [[ "$output" =~ "team_source=project" ]]
 }
 
-@test "whoami: returns multiple when multiple identities" {
-  bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj
-  bash "$SCRIPTS/join.sh" myteam reviewer claude-code /tmp/proj
-  run bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
+@test "whoami: an old exact registration cannot replace the project basename team" {
+  local project="$TEST_SKILL_DIR/current-project"
+  mkdir -p "$project"
+  bash "$SCRIPTS/join.sh" opus48 executor codex "$project"
+  run env -u CODEX_THREAD_ID bash "$SCRIPTS/whoami.sh" "$project" codex
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "multiple=true" ]]
+  [[ "$output" =~ "not_joined=true" ]]
+  [[ "$output" =~ "selected_team=current-project" ]]
+  [[ "$output" =~ "team_source=project" ]]
+  [[ ! "$output" =~ "executor" ]]
+}
+
+@test "whoami: resolved project root basename is stable from a subdirectory" {
+  local project="$TEST_SKILL_DIR/folder-team"
+  mkdir -p "$project/sub/dir"
+  bash "$SCRIPTS/join.sh" folder-team executor codex "$project"
+  run env -u CODEX_THREAD_ID bash "$SCRIPTS/whoami.sh" "$project/sub/dir" codex
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "candidate_agents=executor" ]]
+  [[ "$output" =~ "selected_team=folder-team" ]]
+  [[ "$output" =~ "project=$project" ]]
+}
+
+@test "whoami: returns all candidates when multiple identities are unbound" {
+  bash "$SCRIPTS/join.sh" proj alice claude-code /tmp/proj
+  bash "$SCRIPTS/join.sh" proj reviewer claude-code /tmp/proj
+  run env -u CLAUDE_CODE_SESSION_ID bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "reason=project_team_requires_agent" ]]
   [[ "$output" =~ "alice" ]]
   [[ "$output" =~ "reviewer" ]]
+}
+
+@test "whoami: explicit team is a hard candidate filter and does not infer an unbound sole role" {
+  bash "$SCRIPTS/join.sh" opus48 old-executor codex /tmp/proj
+  bash "$SCRIPTS/join.sh" agmsg-cmux executor codex /tmp/proj
+  run bash "$SCRIPTS/whoami.sh" /tmp/proj codex --team agmsg-cmux
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "reason=explicit_team_requires_agent" ]]
+  [[ "$output" =~ "candidate_agents=executor" ]]
+  [[ "$output" =~ "candidate_teams=agmsg-cmux" ]]
+  [[ "$output" =~ "selected_team=agmsg-cmux" ]]
+  [[ ! "$output" =~ "old-executor" ]]
+}
+
+@test "whoami: explicit team returns its single valid current-session binding" {
+  bash "$SCRIPTS/join.sh" opus48 old-executor codex /tmp/proj
+  bash "$SCRIPTS/join.sh" agmsg-cmux executor codex /tmp/proj
+  record_whoami_binding agmsg-cmux executor current-thread /tmp/proj codex
+  CODEX_THREAD_ID=current-thread run bash "$SCRIPTS/whoami.sh" /tmp/proj codex --team agmsg-cmux
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "agent=executor" ]]
+  [[ "$output" =~ "teams=agmsg-cmux" ]]
+  [[ ! "$output" =~ "selection_required=true" ]]
+  [[ ! "$output" =~ "old-executor" ]]
+}
+
+@test "whoami: positional team filter remains supported" {
+  bash "$SCRIPTS/join.sh" myteam alice codex /tmp/proj
+  run bash "$SCRIPTS/whoami.sh" /tmp/proj codex myteam
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "candidate_agents=alice" ]]
+  [[ "$output" =~ "selected_team=myteam" ]]
+}
+
+@test "whoami: explicit team with no project registration does not fall back" {
+  bash "$SCRIPTS/join.sh" opus48 old-executor codex /tmp/proj
+  run bash "$SCRIPTS/whoami.sh" /tmp/proj codex --team agmsg-cmux
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "not_joined=true" ]]
+  [[ "$output" =~ "selected_team=agmsg-cmux" ]]
+  [[ ! "$output" =~ "old-executor" ]]
+}
+
+@test "whoami: rejects an empty explicit team" {
+  run bash "$SCRIPTS/whoami.sh" /tmp/proj codex --team ""
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "Usage:" ]]
+}
+
+@test "whoami: ignores a stale session binding" {
+  bash "$SCRIPTS/join.sh" proj alice codex /tmp/proj
+  record_whoami_binding proj alice old-thread /tmp/proj codex
+  CODEX_THREAD_ID=new-thread run bash "$SCRIPTS/whoami.sh" /tmp/proj codex
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "reason=project_team_requires_agent" ]]
+}
+
+@test "whoami: ignores bindings whose recorded project or type is wrong" {
+  bash "$SCRIPTS/join.sh" proj alice codex /tmp/proj
+  record_whoami_binding proj alice thread-1 /tmp/other codex
+  CODEX_THREAD_ID=thread-1 run bash "$SCRIPTS/whoami.sh" /tmp/proj codex
+  [[ "$output" =~ "selection_required=true" ]]
+
+  record_whoami_binding proj alice thread-1 /tmp/proj claude-code
+  CODEX_THREAD_ID=thread-1 run bash "$SCRIPTS/whoami.sh" /tmp/proj codex
+  [[ "$output" =~ "selection_required=true" ]]
+}
+
+@test "whoami: ignores an unregistered role-session record" {
+  bash "$SCRIPTS/join.sh" proj alice codex /tmp/proj
+  record_whoami_binding proj ghost thread-1 /tmp/proj codex
+  CODEX_THREAD_ID=thread-1 run bash "$SCRIPTS/whoami.sh" /tmp/proj codex
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "candidate_agents=alice" ]]
+  [[ ! "$output" =~ "ghost" ]]
+}
+
+@test "whoami: rejects multiple valid bindings for the current session" {
+  bash "$SCRIPTS/join.sh" team-a alice codex /tmp/proj
+  bash "$SCRIPTS/join.sh" team-b bob codex /tmp/proj
+  record_whoami_binding team-a alice shared-thread /tmp/proj codex
+  record_whoami_binding team-b bob shared-thread /tmp/proj codex
+  CODEX_THREAD_ID=shared-thread run bash "$SCRIPTS/whoami.sh" /tmp/proj codex
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "reason=ambiguous_session_binding" ]]
+  [[ "$output" =~ "candidate_agents=alice,bob" ]]
+  [[ "$output" =~ "candidate_teams=team-a,team-b" ]]
+}
+
+@test "whoami: same role in multiple teams is ambiguous until its bound team is explicit" {
+  bash "$SCRIPTS/join.sh" team-a executor codex /tmp/proj
+  bash "$SCRIPTS/join.sh" team-b executor codex /tmp/proj
+  record_whoami_binding team-a executor shared-thread /tmp/proj codex
+  record_whoami_binding team-b executor shared-thread /tmp/proj codex
+  CODEX_THREAD_ID=shared-thread run bash "$SCRIPTS/whoami.sh" /tmp/proj codex
+  [[ "$output" =~ "reason=ambiguous_session_binding" ]]
+
+  CODEX_THREAD_ID=shared-thread run bash "$SCRIPTS/whoami.sh" /tmp/proj codex --team team-b
+  [[ "$output" =~ "agent=executor" ]]
+  [[ "$output" =~ "teams=team-b" ]]
+  [[ ! "$output" =~ "team-a" ]]
 }
 
 @test "whoami: lists available teams when not joined" {
@@ -213,23 +372,27 @@ teardown() {
 @test "whoami: finds re-joined agent in another project registration" {
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj-a
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj-b
-  run bash "$SCRIPTS/whoami.sh" /tmp/proj-b claude-code
+  record_whoami_binding myteam alice session-b /tmp/proj-b claude-code
+  CLAUDE_CODE_SESSION_ID=session-b run bash "$SCRIPTS/whoami.sh" /tmp/proj-b claude-code
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=alice" ]]
   [[ "$output" =~ "teams=myteam" ]]
 }
 
-@test "whoami: suggests same-type agents registered elsewhere when no exact match" {
+@test "whoami: registrations elsewhere do not override the project basename team" {
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj-a
   run bash "$SCRIPTS/whoami.sh" /tmp/proj-b claude-code
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "suggest=true" ]]
-  [[ "$output" =~ "agents=alice" ]]
+  [[ "$output" =~ "not_joined=true" ]]
+  [[ "$output" =~ "selected_team=proj-b" ]]
+  [[ "$output" =~ "team_source=project" ]]
+  [[ ! "$output" =~ "agents=alice" ]]
   [[ "$output" =~ "available_teams=myteam" ]]
 }
 
 @test "whoami: auto-detects claude-code from CLAUDE_CODE_SESSION_ID env" {
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj
+  record_whoami_binding myteam alice test-session /tmp/proj claude-code
   CLAUDE_CODE_SESSION_ID=test-session run bash "$SCRIPTS/whoami.sh" /tmp/proj
   [ "$status" -eq 0 ]
   [[ "$output" =~ "agent=alice" ]]
@@ -237,19 +400,21 @@ teardown() {
 }
 
 @test "whoami: auto-detects codex from CODEX_SANDBOX env" {
-  bash "$SCRIPTS/join.sh" myteam bob codex /tmp/proj
+  bash "$SCRIPTS/join.sh" proj bob codex /tmp/proj
   # Unset CLAUDE_CODE_SESSION_ID: bats can run under a CC session that
   # already exports it, which would shadow the codex signal under the
   # CLAUDE_CODE_SESSION_ID-first detection order.
   unset CLAUDE_CODE_SESSION_ID
   CODEX_SANDBOX=seatbelt run bash "$SCRIPTS/whoami.sh" /tmp/proj
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "agent=bob" ]]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "candidate_agents=bob" ]]
   [[ "$output" =~ "type=codex" ]]
 }
 
 @test "whoami: auto-detects codex from CODEX_THREAD_ID env" {
   bash "$SCRIPTS/join.sh" myteam bob codex /tmp/proj
+  record_whoami_binding myteam bob some-thread /tmp/proj codex
   unset CLAUDE_CODE_SESSION_ID
   CODEX_THREAD_ID=some-thread run bash "$SCRIPTS/whoami.sh" /tmp/proj
   [ "$status" -eq 0 ]
@@ -258,7 +423,7 @@ teardown() {
 }
 
 @test "whoami: defaults to claude-code when no env vars set" {
-  bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj
+  bash "$SCRIPTS/join.sh" proj alice claude-code /tmp/proj
   unset CLAUDE_CODE_SESSION_ID CODEX_SANDBOX CODEX_THREAD_ID GEMINI_API_KEY GOOGLE_GEMINI_CLI
   local fake_bin="$BATS_TEST_TMPDIR/no-proc-detect-bin"
   mkdir -p "$fake_bin"
@@ -269,20 +434,32 @@ EOF
   chmod +x "$fake_bin/ps"
   PATH="$fake_bin:$PATH" run bash "$SCRIPTS/whoami.sh" /tmp/proj
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "agent=alice" ]]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "candidate_agents=alice" ]]
   [[ "$output" =~ "type=claude-code" ]]
 }
 
 @test "whoami: explicit type overrides auto-detection" {
-  bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj
+  bash "$SCRIPTS/join.sh" proj alice claude-code /tmp/proj
   bash "$SCRIPTS/join.sh" myteam bob codex /tmp/proj
   CODEX_SANDBOX=test run bash "$SCRIPTS/whoami.sh" /tmp/proj claude-code
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "agent=alice" ]]
+  [[ "$output" =~ "selection_required=true" ]]
+  [[ "$output" =~ "candidate_agents=alice" ]]
   [[ "$output" =~ "type=claude-code" ]]
 }
 
 # --- reset.sh ---
+
+@test "reset: unbound candidate requires an explicit agent id" {
+  bash "$SCRIPTS/join.sh" proj alice claude-code /tmp/proj
+  run env -u CLAUDE_CODE_SESSION_ID bash "$SCRIPTS/reset.sh" /tmp/proj claude-code
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "Identity selection is required" ]]
+  [[ "$output" =~ "Pass an agent_id explicitly" ]]
+  run bash "$SCRIPTS/team.sh" proj
+  [[ "$output" =~ "alice" ]]
+}
 
 @test "reset: removes only current project registration" {
   bash "$SCRIPTS/join.sh" myteam alice claude-code /tmp/proj-a
@@ -291,8 +468,9 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" =~ "removed 1 registration" ]]
   run bash "$SCRIPTS/whoami.sh" /tmp/proj-a claude-code
-  [[ "$output" =~ "suggest=true" ]]
-  run bash "$SCRIPTS/whoami.sh" /tmp/proj-b claude-code
+  [[ "$output" =~ "not_joined=true" ]]
+  record_whoami_binding myteam alice session-b /tmp/proj-b claude-code
+  CLAUDE_CODE_SESSION_ID=session-b run bash "$SCRIPTS/whoami.sh" /tmp/proj-b claude-code
   [[ "$output" =~ "agent=alice" ]]
 }
 

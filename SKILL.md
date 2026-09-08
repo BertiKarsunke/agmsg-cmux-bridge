@@ -35,7 +35,11 @@ After this runs once, `~/.agents/skills/agmsg/` is populated and you can skip St
 ```bash
 ~/.agents/skills/agmsg/scripts/whoami.sh "$(pwd)" <type>
 # type: claude-code, codex, gemini, antigravity, copilot
-# Returns: agent=... / multiple=true ... / suggest=true ... / not_joined=true ...
+# Optional hard team filter: append --team <team>
+# Returns a bound agent=... only for one valid current-session role record.
+# Otherwise returns selection_required=true or not_joined=true with
+# selected_team=<explicit-team-or-resolved-project-basename>. Stored
+# registrations in other teams never become the current session automatically.
 ```
 
 ### Step 2a: If not in a team — join one

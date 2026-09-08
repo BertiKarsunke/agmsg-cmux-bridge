@@ -107,7 +107,13 @@ git pull && ./install.sh --update
 ./uninstall.sh --keep-data   # 스킬만 제거, DB/팀 보존
 ```
 
+설치 시 Codex의 `~/.codex/AGENTS.md`에는 관리 블록을, `~/.codex/<cmd>/`에는 planner/worker 참고 문서와 spawn 옵션을 만든다. Claude에는 `~/.claude/CLAUDE-<cmd>.md`와 `~/.claude/CLAUDE.md` import 관리 블록을 설치한다. 이 문서들은 사용자가 agmsg 역할 또는 3-agent 팀 시작을 명시했을 때만 활성화된다. 문서를 열거나 검토하는 것만으로 팀에 합류하거나 worker를 띄우지 않는다.
+
+공통 파일의 관리 블록 바깥 내용은 보존한다. 전용 경로에 기존 비관리 파일, 소유자가 다른 파일, 잘못된 marker가 있으면 덮어쓰지 않고 경고와 함께 건너뛴다. 제거도 agmsg 소유 블록/파일만 대상으로 하며 사용자 추가 내용은 남긴다.
+
 `setup.sh` 는 upstream(`fujibee/agmsg`)을 clone해 설치하는 원라이너용이다. 이 포크 기능(pane-push)을 쓰려면 이 checkout에서 `./install.sh` 를 쓴다.
+
+데스크톱 앱 번들은 작업 트리가 아니라 `app/AGMSG_CORE_REF`의 고정 ref를 사용한다. 구 pin은 계속 빌드되지만 역할 문서는 포함하지 않으며, 해당 기능은 helper와 `role-docs/`가 들어간 릴리스로 pin을 올린 뒤 앱에 반영된다.
 
 ---
 

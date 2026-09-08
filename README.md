@@ -52,6 +52,13 @@ cd agmsg-cmux-bridge
 
 `install.sh` installs the skill to `~/.agents/skills/<cmd>/`, where `<cmd>` defaults to `agmsg`.
 
+It also installs opt-in team-role guidance for Codex and Claude:
+
+- a managed entry block in `~/.codex/AGENTS.md`, with companion references under `~/.codex/<cmd>/`;
+- `~/.claude/CLAUDE-<cmd>.md` and a managed import block in `~/.claude/CLAUDE.md`.
+
+These references activate only when the user explicitly assigns an agmsg role or asks to start the three-agent team. Merely loading or reviewing a document never joins a team or spawns a worker. Shared-file content outside the managed blocks is preserved. Existing unmanaged or malformed companion files are left byte-for-byte unchanged and reported as skipped; resolve the warning yourself if you want agmsg to own that path.
+
 The **command name** determines:
 - Skill folder: `~/.agents/skills/<cmd>/`
 - Claude Code / Copilot CLI: `/<cmd>`
@@ -140,11 +147,10 @@ To always pass a given agent type extra CLI flags on spawn (e.g. a default permi
 ```yaml
 claude-code:
   --permission-mode: acceptEdits
-  --dangerously-skip-permissions: true   # a `true` value emits the flag with no argument
 
 codex:
   --sandbox: workspace-write
-  --dangerously-skip-permissions: false  # a `false` value suppresses the flag entirely
+  --ask-for-approval: on-request
 ```
 
 Eight of the nine agent types are spawnable — `claude-code`, `codex`, `grok-build`, `cursor`, `gemini`, `antigravity`, `copilot`, `opencode`. `hermes` is not: its CLI has no mode that starts an interactive session pre-seeded with an initial prompt (#279). macOS is the primary target; Linux and Windows are best-effort (please open an issue/PR if your terminal isn't handled). Headless environments — no tmux **and** no usable terminal — error out, since the agent CLIs need an interactive terminal.
@@ -345,6 +351,8 @@ After installation, restart the agent CLI so it discovers the skill, then run `/
 
 Current `setup.sh` behavior is upstream-specific: it clones `https://github.com/fujibee/agmsg.git` at `${AGMSG_REF:-main}` and runs that checkout's `install.sh`. Use `setup.sh` only when you intentionally want the canonical upstream installer, unless it is changed to point at this fork.
 
+The desktop app bundles the committed `app/AGMSG_CORE_REF`, not the working tree. Older pins remain buildable but do not gain managed role documents; the app receives this feature only after that pin is deliberately advanced to a release containing the helper and `role-docs/` sources.
+
 ## Script reference
 
 Basic agmsg flow:
@@ -392,7 +400,7 @@ An `uninstall.sh` copy ships inside every install:
 
 (If you have a `git clone` checkout handy, `./uninstall.sh` from the repo root works the same way.)
 
-Auto-detects installed skill directories and cleans up: skill files, slash commands, hooks, AGENTS.md sections, and team configs.
+Auto-detects installed skill directories and cleans up: skill files, slash commands, hooks, team configs, and only agmsg-owned role-document blocks/files. User content and unmanaged/conflicting role documents are preserved.
 
 ## Environment Variables
 

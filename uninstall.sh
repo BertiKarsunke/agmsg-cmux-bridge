@@ -10,6 +10,11 @@ set -euo pipefail
 #   ./uninstall.sh --keep-data        # Remove skill but keep DB and teams
 
 AGENTS_DIR="$HOME/.agents"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/scripts/lib/role-docs-install.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/scripts/lib/role-docs-install.sh"
+fi
 
 AUTO_YES=false
 KEEP_DATA=false
@@ -197,6 +202,14 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
   done
 done
 
+# --- 2d. Remove only installer-owned role guidance blocks ---
+if declare -F agmsg_role_docs_uninstall >/dev/null 2>&1; then
+  for SKILL_DIR in "${SKILL_DIRS[@]}"; do
+    SKILL_NAME="$(basename "$SKILL_DIR")"
+    agmsg_role_docs_uninstall "$SKILL_NAME"
+  done
+fi
+
 SQLITE_SHIM="$AGENTS_DIR/bin/sqlite3"
 REMOVED_SQLITE_SHIM=false
 if [ -f "$SQLITE_SHIM" ] && grep -q "sqlite3 compatibility shim for agmsg" "$SQLITE_SHIM" 2>/dev/null; then
@@ -219,9 +232,9 @@ for SKILL_DIR in "${SKILL_DIRS[@]}"; do
   if [ "$KEEP_DATA" = true ]; then
     echo ""
     echo "  Removing $SKILL_NAME skill (keeping DB and teams)..."
-    rm -rf "$SKILL_DIR/scripts" "$SKILL_DIR/templates" "$SKILL_DIR/agents"
+    rm -rf "$SKILL_DIR/scripts" "$SKILL_DIR/templates" "$SKILL_DIR/role-docs" "$SKILL_DIR/agents"
     rm -f "$SKILL_DIR/SKILL.md"
-    echo "  - removed scripts, templates, SKILL.md"
+    echo "  - removed scripts, templates, role docs, SKILL.md"
     echo "  ~ preserved $SKILL_DIR/db/ and $SKILL_DIR/teams/"
     REMOVED=true
   else

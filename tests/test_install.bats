@@ -655,3 +655,124 @@ PY
   grep -q "whoami.sh \"\$(pwd)\" grok-build" "$SK/SKILL.md"
   ! grep -q "whoami.sh \"\$(pwd)\" codex" "$SK/SKILL.md"
 }
+
+# --- opt-in Codex / Claude role guidance ---
+
+@test "install: creates rendered Codex and Claude role guidance on a fresh HOME" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+
+  [ -f "$FAKE_HOME/.codex/AGENTS.md" ]
+  [ -f "$FAKE_HOME/.codex/agmsg/planner.md" ]
+  [ -f "$FAKE_HOME/.codex/agmsg/workers.md" ]
+  [ -f "$FAKE_HOME/.codex/agmsg/README.md" ]
+  [ -f "$FAKE_HOME/.codex/agmsg/options/scout.yaml" ]
+  [ -f "$FAKE_HOME/.codex/agmsg/options/executor.yaml" ]
+  [ -f "$FAKE_HOME/.claude/CLAUDE-agmsg.md" ]
+  [ -f "$FAKE_HOME/.claude/CLAUDE.md" ]
+
+  grep -q "$SK" "$FAKE_HOME/.codex/agmsg/planner.md"
+  grep -q "$FAKE_HOME/.codex/agmsg" "$FAKE_HOME/.codex/AGENTS.md"
+  grep -q '@CLAUDE-agmsg.md' "$FAKE_HOME/.claude/CLAUDE.md"
+  ! grep -R -E -q '__CMD_NAME__|__SKILL_DIR__|__ROLE_DIR__|/Users/szyi' \
+    "$FAKE_HOME/.codex/AGENTS.md" "$FAKE_HOME/.codex/agmsg" "$FAKE_HOME/.claude/CLAUDE-agmsg.md"
+
+  # The installed options are comments + the simple flat YAML dialect used by
+  # spawn-options.sh. Validate through that real parser, not just text grep.
+  run env HOME="$FAKE_HOME" \
+    AGMSG_SPAWN_OPTIONS_FILE="$FAKE_HOME/.codex/agmsg/options/scout.yaml" \
+    bash -c '. "$1"; agmsg_spawn_options_tokens codex' _ "$SK/scripts/lib/spawn-options.sh"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'-c\nmodel_reasoning_effort="medium"\n--sandbox\nworkspace-write\n--ask-for-approval\non-request' ]
+}
+
+@test "install update is idempotent and preserves foreign global content" {
+  mkdir -p "$FAKE_HOME/.codex" "$FAKE_HOME/.claude"
+  printf 'codex foreign before\n' > "$FAKE_HOME/.codex/AGENTS.md"
+  printf 'claude foreign before\n@OTHER.md\n' > "$FAKE_HOME/.claude/CLAUDE.md"
+
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  printf 'codex foreign after\n' >> "$FAKE_HOME/.codex/AGENTS.md"
+  printf 'claude foreign after\n' >> "$FAKE_HOME/.claude/CLAUDE.md"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg --update
+
+  [ "$(grep -c '^<!-- agmsg:ROLE-ENTRY:START -->$' "$FAKE_HOME/.codex/AGENTS.md")" -eq 1 ]
+  [ "$(grep -c '^<!-- agmsg:IMPORT:START -->$' "$FAKE_HOME/.claude/CLAUDE.md")" -eq 1 ]
+  grep -q '^codex foreign before$' "$FAKE_HOME/.codex/AGENTS.md"
+  grep -q '^codex foreign after$' "$FAKE_HOME/.codex/AGENTS.md"
+  grep -q '^claude foreign before$' "$FAKE_HOME/.claude/CLAUDE.md"
+  grep -q '^@OTHER.md$' "$FAKE_HOME/.claude/CLAUDE.md"
+  grep -q '^claude foreign after$' "$FAKE_HOME/.claude/CLAUDE.md"
+}
+
+@test "install: unmanaged companion files are byte-preserved and reported as skipped" {
+  mkdir -p "$FAKE_HOME/.codex/agmsg/options" "$FAKE_HOME/.claude"
+  printf 'my planner notes\n' > "$FAKE_HOME/.codex/agmsg/planner.md"
+  printf 'my claude notes\n' > "$FAKE_HOME/.claude/CLAUDE-agmsg.md"
+  printf 'my yaml: untouched\n' > "$FAKE_HOME/.codex/agmsg/options/scout.yaml"
+  cp "$FAKE_HOME/.codex/agmsg/planner.md" "$BATS_TEST_TMPDIR/planner.before"
+  cp "$FAKE_HOME/.claude/CLAUDE-agmsg.md" "$BATS_TEST_TMPDIR/claude-role.before"
+  cp "$FAKE_HOME/.codex/agmsg/options/scout.yaml" "$BATS_TEST_TMPDIR/scout-options.before"
+
+  run env HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "skipped unmanaged/conflicting files" ]]
+  [[ "$output" =~ "$FAKE_HOME/.codex/agmsg/planner.md" ]]
+  [[ "$output" =~ "$FAKE_HOME/.claude/CLAUDE-agmsg.md" ]]
+  [[ "$output" =~ "$FAKE_HOME/.codex/agmsg/options/scout.yaml" ]]
+  cmp "$BATS_TEST_TMPDIR/planner.before" "$FAKE_HOME/.codex/agmsg/planner.md"
+  cmp "$BATS_TEST_TMPDIR/claude-role.before" "$FAKE_HOME/.claude/CLAUDE-agmsg.md"
+  cmp "$BATS_TEST_TMPDIR/scout-options.before" "$FAKE_HOME/.codex/agmsg/options/scout.yaml"
+}
+
+@test "install update preserves common-file mode and a suffix without final newline" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  local target="$FAKE_HOME/.codex/AGENTS.md"
+  local suffix='user-suffix-without-newline'
+  printf '%s' "$suffix" >> "$target"
+  chmod 640 "$target"
+  local mode_before
+  mode_before="$(ls -l "$target" | cut -c1-10)"
+
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg --update
+
+  [ "$(ls -l "$target" | cut -c1-10)" = "$mode_before" ]
+  [ "$(tail -c "${#suffix}" "$target")" = "$suffix" ]
+  [ "$(tail -c 1 "$target")" = "${suffix: -1}" ]
+  [ "$(grep -c '^<!-- agmsg:ROLE-ENTRY:START -->$' "$target")" -eq 1 ]
+}
+
+@test "install: custom command renders isolated role paths and imports" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd msg
+
+  [ -f "$FAKE_HOME/.codex/msg/planner.md" ]
+  [ -f "$FAKE_HOME/.claude/CLAUDE-msg.md" ]
+  grep -q "$FAKE_HOME/.agents/skills/msg" "$FAKE_HOME/.codex/msg/planner.md"
+  grep -q '@CLAUDE-msg.md' "$FAKE_HOME/.claude/CLAUDE.md"
+  grep -q '<!-- agmsg:owner=msg -->' "$FAKE_HOME/.codex/AGENTS.md"
+}
+
+@test "install: malformed and duplicate role markers are diagnosed and preserved" {
+  mkdir -p "$FAKE_HOME/.codex" "$FAKE_HOME/.claude"
+  printf 'codex foreign\n<!-- agmsg:ROLE-ENTRY:START -->\nbroken\n' > "$FAKE_HOME/.codex/AGENTS.md"
+  printf 'claude foreign\n<!-- agmsg:IMPORT:START -->\na\n<!-- agmsg:IMPORT:END -->\n<!-- agmsg:IMPORT:START -->\nb\n<!-- agmsg:IMPORT:END -->\n' > "$FAKE_HOME/.claude/CLAUDE.md"
+  cp "$FAKE_HOME/.codex/AGENTS.md" "$BATS_TEST_TMPDIR/agents.before"
+  cp "$FAKE_HOME/.claude/CLAUDE.md" "$BATS_TEST_TMPDIR/claude.before"
+
+  run env HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "malformed or duplicate managed markers" ]]
+  cmp "$BATS_TEST_TMPDIR/agents.before" "$FAKE_HOME/.codex/AGENTS.md"
+  cmp "$BATS_TEST_TMPDIR/claude.before" "$FAKE_HOME/.claude/CLAUDE.md"
+}
+
+@test "install: another command cannot take over shared role entry blocks" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  run env HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd msg
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "managed by command 'agmsg'" ]]
+  grep -q '<!-- agmsg:owner=agmsg -->' "$FAKE_HOME/.codex/AGENTS.md"
+  ! grep -q '<!-- agmsg:owner=msg -->' "$FAKE_HOME/.codex/AGENTS.md"
+  grep -q '@CLAUDE-agmsg.md' "$FAKE_HOME/.claude/CLAUDE.md"
+  ! grep -q '@CLAUDE-msg.md' "$FAKE_HOME/.claude/CLAUDE.md"
+}

@@ -26,6 +26,8 @@ AGENTS_DIR="$HOME/.agents"
 # helpers; safe to source.
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/scripts/lib/type-registry.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/scripts/lib/role-docs-install.sh"
 
 # Resolve a provenance version for the source being installed, so an installed
 # copy is uniquely identifiable even between tagged releases (the canonical
@@ -250,6 +252,8 @@ if [ "$UPDATE_ONLY" = true ]; then
   # ship without enumerating files. The agent-type manifests and per-type runtimes
   # live under scripts/drivers/types/ now, so this single copy carries them too.
   cp -R "$SCRIPT_DIR/scripts/." "$SKILL_DIR/scripts/"
+  mkdir -p "$SKILL_DIR/role-docs"
+  cp -R "$SCRIPT_DIR/role-docs/." "$SKILL_DIR/role-docs/"
   # Ship the external-plugin drop-in dir (just its README) so the location exists
   # post-install. A plain cp — not cp -R --delete — preserves any plugins the
   # user dropped in and their db/trusted-plugins opt-ins.
@@ -308,6 +312,7 @@ if [ "$UPDATE_ONLY" = true ]; then
       && echo "  + refreshed Codex monitor shim (~/.agents/bin/codex)"
   fi
   install_windows_helpers
+  agmsg_role_docs_install "$SCRIPT_DIR/role-docs" "$CMD_NAME" "$SKILL_DIR"
   INSTALLED_VERSION="$(agmsg_source_version)"
   printf '%s\n' "$INSTALLED_VERSION" > "$SKILL_DIR/VERSION"
   echo "  + updated scripts, templates, and SKILL.md (version $INSTALLED_VERSION)"
@@ -357,6 +362,8 @@ sed "s/__SKILL_NAME__/$CMD_NAME/g" "$(agmsg_type_template_path "$TPL_TYPE")" > "
 # without enumerating files. The agent-type manifests and per-type runtimes live
 # under scripts/drivers/types/ now, so this single copy carries them too.
 cp -R "$SCRIPT_DIR/scripts/." "$SKILL_DIR/scripts/"
+mkdir -p "$SKILL_DIR/role-docs"
+cp -R "$SCRIPT_DIR/role-docs/." "$SKILL_DIR/role-docs/"
 # Ship the external-plugin drop-in dir (just its README) so the location exists
 # post-install. A plain cp — not cp -R --delete — preserves any plugins the user
 # dropped in and their db/trusted-plugins opt-ins.
@@ -453,6 +460,12 @@ if [ -d "$HOME/.grok" ]; then
   sed "s/__SKILL_NAME__/$CMD_NAME/g" "$(agmsg_type_template_path grok-build)" > "$GROK_SKILL_DIR/SKILL.md"
   echo "  + installed /$CMD_NAME skill to ~/.grok/skills/"
 fi
+
+# --- Install opt-in Codex / Claude role guidance ---
+# Shared entry files use narrow managed blocks. Companion documents are created
+# only when absent and updated only when their owned marker is still intact;
+# an unmanaged/conflicting file is preserved and reported instead of adopted.
+agmsg_role_docs_install "$SCRIPT_DIR/role-docs" "$CMD_NAME" "$SKILL_DIR"
 
 # Codex sandbox writable_roots are configured by configure_codex_sandbox() at
 # the "Done" step below — the single source of truth for db/, teams/, and run/.

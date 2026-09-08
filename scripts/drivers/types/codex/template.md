@@ -7,17 +7,21 @@ Agent messaging command. **IMPORTANT: Always use the provided scripts. NEVER dir
 
 ## Identity
 
-If you already know your AGENT and TEAMS from a previous `$__SKILL_NAME__` call in this session, skip to **Execute** below.
+If you already know your AGENT and TEAMS from a previous `$__SKILL_NAME__` call in this session, skip to **Execute** below unless the user explicitly names a different team now; the current explicit team always wins.
 
-Otherwise, run: `~/.agents/skills/__SKILL_NAME__/scripts/whoami.sh "$(pwd)" codex`
+Otherwise, run: `~/.agents/skills/__SKILL_NAME__/scripts/whoami.sh "$(pwd)" codex`. If the user explicitly chose a team, or this session already remembers one, append `--team <team>`.
 
-Four possible outputs:
+Five possible outputs:
 
 **A) Single identity:**
 `agent=<name> teams=<t1,t2,...> type=codex project=<path>`
 → Remember AGENT and TEAMS, then go to **Execute**.
 
-**B) Multiple identities:**
+**B) Selection required:**
+`selection_required=true reason=<reason> candidate_agents=<...> candidate_teams=<...> ... [selected_team=<team>]`
+→ Stored registrations are candidates, not this session's identity. Do not read any inbox. Keep `selected_team` when present; otherwise ask for a team, then ask for an agent unless the user already named one. Verify the chosen team-agent pair against `identities.sh "$(pwd)" codex` (its tab-separated rows are authoritative; never combine the separate candidate CSVs by position), then run the `actas` flow.
+
+**Legacy multiple identities:**
 `multiple=true agents=<n1,n2,...> teams=<t1,t2,...> type=codex project=<path>`
 → Ask the user which agent name to use for this session, then go to **Execute**.
 
@@ -25,13 +29,15 @@ Four possible outputs:
 `not_joined=true available_teams=<t1,t2,...>` (or `available_teams=none`)
 → Show the user the available teams from the output, then:
 
+  If the output includes `selected_team=<team>`, use that team and do not ask for a team name; ask only for the missing agent name. The project-basename default must not be replaced by an older suggested registration.
+
   > **First-time setup required.**
   > Joining a team so this agent can send and receive messages.
   > - **Team name**: a group of agents that can message each other (available: <list from output>)
   > - **Agent name**: this agent's identity within the team
 
-  1. Ask: "Enter a team name (joins existing or creates new)"
-  2. Ask: "Enter a name for this agent"
+  1. If no `selected_team` was returned, ask: "Enter a team name (joins existing or creates new)"
+  2. If the user has not already named the role, ask: "Enter a name for this agent"
   3. **You MUST use join.sh** — run: `~/.agents/skills/__SKILL_NAME__/scripts/join.sh <team> <agent_name> codex "$(pwd)"`
   4. Show the result and explain:
 
@@ -120,14 +126,14 @@ If argument starts with "pane" (e.g. "pane", "pane register", "pane status", "pa
 
 If argument starts with "actas" followed by an agent name (e.g. "actas alice"):
 1. Parse the new role name.
-2. Run `~/.agents/skills/__SKILL_NAME__/scripts/identities.sh "$(pwd)" codex` to see whether the role is already registered for this (project, type).
-3. If the name does not appear in the output, join under the existing team. For a single team, run `~/.agents/skills/__SKILL_NAME__/scripts/join.sh <team> <name> codex "$(pwd)"`. For multiple teams, ask the user which team to join the new role into.
-4. Re-register the current pane for `<name>` so peers can pane-push to the live surface:
+2. Determine the active team only from the user's explicit team, a `selected_team` already returned in this session, a valid bound `agent=... teams=<team>` result, or a previously remembered active TEAM. A stored registration by itself is not a session team choice. If none is known, run `whoami.sh "$(pwd)" codex`; use its single bound `teams=<team>` or its `selected_team` when present, otherwise ask the user which team to use.
+3. Run `~/.agents/skills/__SKILL_NAME__/scripts/identities.sh "$(pwd)" codex` and check for the exact `<active-team><TAB><name>` pair. The same name may exist in multiple teams: ignore pairs in every non-active team. If the exact pair is absent, join only the active team with `~/.agents/skills/__SKILL_NAME__/scripts/join.sh <active-team> <name> codex "$(pwd)"`.
+4. Re-register the current pane for `<name>` in the active team only, so peers can pane-push to the live surface:
    `~/.agents/skills/__SKILL_NAME__/scripts/pane.sh register <team> <name> codex "$(pwd)"`
    Run this even when the role was already registered; step 3's `join.sh` only runs for new roles. If this is not a tmux/cmux/wezterm pane, ignore the failure and continue (best-effort).
 5. Set the session's active FROM to `<name>` for every `send.sh` call until another `actas`.
-6. Record this session as the role's seat so it can be resumed later (best-effort): determine which team `<name>` belongs to (from the identities output / the join above), then run `~/.agents/skills/__SKILL_NAME__/scripts/drivers/types/codex/codex-record-session.sh <team> <name> "$(pwd)"`. It writes the record only when this session's codex thread id is unambiguous; otherwise it records nothing and the role simply boots fresh next time (no harm). This is what lets a later `spawn <role>` bring the role back into this conversation.
-7. Tell the user: "Now acting as `<name>`. Sends will use `<name>` as the from agent. (Codex has no Monitor tool, so receive still covers all of your registered roles in this project.)"
+6. Record this session as the active team's role seat only (best-effort): run `~/.agents/skills/__SKILL_NAME__/scripts/drivers/types/codex/codex-record-session.sh <active-team> <name> "$(pwd)"`. It writes the record only when this session's codex thread id is unambiguous; otherwise it records nothing and the role simply boots fresh next time (no harm). This is what lets a later `spawn <role>` bring the role back into this conversation.
+7. Tell the user: "Now acting as `<name>` in `<active-team>`. Sends will use `<name>` as the from agent. Receive/check only this selected team-role inbox."
 
 If argument starts with "drop" followed by an agent name (e.g. "drop alice"):
 1. Parse the role name.

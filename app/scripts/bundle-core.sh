@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Bundles a pinned snapshot of agmsg-core (scripts/, install.sh, uninstall.sh)
+# Bundles a pinned snapshot of agmsg-core (scripts/, install.sh, uninstall.sh,
+# and role-docs/ when that pinned installer supports managed role documents)
 # into src-tauri/resources/agmsg-core/ for the app's first-run auto-install
 # flow — see agmsg_install in src-tauri/src/agmsg.rs. At runtime the app runs
 # this bundled install.sh directly, with no network access.
@@ -49,6 +50,24 @@ REQUIRED_PATHS=(
   "scripts/drivers/types/agmsg-app/type.conf"
   "VERSION"
 )
+
+# Older committed pins predate managed role documents and must remain
+# bundleable. Once the archived installer sources the role-doc helper, include
+# and validate every source it needs; enabling the feature in the desktop app
+# therefore requires deliberately bumping AGMSG_CORE_REF to such a release.
+if grep -q 'scripts/lib/role-docs-install\.sh' "$DEST/install.sh"; then
+  git archive "$REF" -- role-docs/ | tar -x -C "$DEST"
+  REQUIRED_PATHS+=(
+    "scripts/lib/role-docs-install.sh"
+    "role-docs/codex-agents.md"
+    "role-docs/codex-planner.md"
+    "role-docs/codex-workers.md"
+    "role-docs/codex-README.md"
+    "role-docs/codex-scout-options.yaml"
+    "role-docs/codex-executor-options.yaml"
+    "role-docs/claude-role.md"
+  )
+fi
 for p in "${REQUIRED_PATHS[@]}"; do
   if [ ! -f "$DEST/$p" ]; then
     echo "bundle-core: pinned ref $REF is missing required path '$p' — bump AGMSG_CORE_REF" >&2

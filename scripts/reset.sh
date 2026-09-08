@@ -74,8 +74,8 @@ elif [ -z "$TARGET_AGENT" ]; then
   WHOAMI=$(bash "$SCRIPT_DIR/whoami.sh" "$PROJECT_PATH" "$AGENT_TYPE")
   if echo "$WHOAMI" | grep -q '^agent='; then
     TARGET_AGENTS=("$(echo "$WHOAMI" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')")
-  elif echo "$WHOAMI" | grep -q '^multiple=true'; then
-    echo "Multiple identities match this project/type. Pass an agent_id explicitly." >&2
+  elif echo "$WHOAMI" | grep -Eq '^(multiple=true|selection_required=true)'; then
+    echo "Identity selection is required for this project/type. Pass an agent_id explicitly." >&2
     exit 1
   else
     echo "No registered identity found for this project/type." >&2
