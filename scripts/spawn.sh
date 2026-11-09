@@ -269,6 +269,22 @@ while IFS= read -r _spawn_opt_tok; do
   SPAWN_OPT_TOKENS+=("$_spawn_opt_tok")
 done < <(agmsg_spawn_options_tokens "$AGENT_TYPE")
 
+# Optional type-specific CLI flags are enabled only when the installed CLI
+# advertises them. Skip monitor mode because its shim routes through --remote.
+SPAWN_CLI_ARGS=()
+_spawn_cli_args="$(agmsg_type_get "$AGENT_TYPE" spawn_args)"
+if [ -n "$_spawn_cli_args" ]; then
+  _spawn_delivery_status="$("$SCRIPT_DIR/delivery.sh" status "$AGENT_TYPE" "$PROJECT" 2>/dev/null || true)"
+  if [ -n "$_spawn_delivery_status" ] && ! printf '%s\n' "$_spawn_delivery_status" | grep -qx 'mode: monitor'; then
+    _spawn_cli_help="$("$CLI_PATH" --help 2>&1 || true)"
+    for _tok in $_spawn_cli_args; do
+      if printf '%s\n' "$_spawn_cli_help" | grep -Fq -- "$_tok"; then
+        SPAWN_CLI_ARGS+=("$_tok")
+      fi
+    done
+  fi
+fi
+
 # Resolve the node launcher path from the manifest (not hardcoded), if any.
 SPAWN_AGENT=""
 if [ -n "$SPAWN_LAUNCHER" ]; then
@@ -473,6 +489,9 @@ esac
     # emitted with %s (not %q) so it stays an assignment, not a single token.
     printf '%s%s' "$MSYS_GUARD" "$CLI_BIN"
     agmsg_role_resume_head "$AGENT_TYPE" "$RESUME_UUID"
+    for _tok in ${SPAWN_CLI_ARGS[@]+"${SPAWN_CLI_ARGS[@]}"}; do
+      printf ' %q' "$_tok"
+    done
     [ -n "$MODEL_ID" ] && printf ' %s %q' "$MODEL_ARG" "$MODEL_ID"
     for _tok in ${SPAWN_OPT_TOKENS[@]+"${SPAWN_OPT_TOKENS[@]}"}; do
       printf ' %q' "$_tok"

@@ -129,6 +129,14 @@ teardown() {
   teardown_test_env
 }
 
+_enable_fake_codex_no_daemon() {
+  cat > "$STUB_BIN/codex" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--help" ]; then echo '      --no-daemon'; fi
+EOF
+  chmod +x "$STUB_BIN/codex"
+}
+
 # --- argument validation ---
 
 @test "spawn: rejects a known type with neither cli= nor spawn= (#277)" {
@@ -368,6 +376,7 @@ seed_resumable() {
 }
 
 @test "spawn: codex resumes via the 'resume' subcommand right after the cli (#339)" {
+  _enable_fake_codex_no_daemon
   bash "$SCRIPTS/join.sh" cxteam existing codex "$PROJ"
   # Record a codex role->session and a matching rollout (codex's transcript).
   export SKILL_DIR="$TEST_SKILL_DIR"
@@ -381,10 +390,37 @@ seed_resumable() {
   [ "$status" -eq 0 ]
   boot="$(cat "$CAPTURE")"; run cat "$boot"
   # Subcommand shape: `codex resume cx-uuid-1 ...` -- resume token right after cli.
-  [[ "$output" == *"codex resume cx-uuid-1"* ]]
+  [[ "$output" == *"codex resume cx-uuid-1 --no-daemon"* ]]
   [[ "$output" == *"actas"* ]]
   # codex has no name_arg, so no -n.
   [[ "$output" != *" -n "* ]]
+}
+
+@test "spawn: codex fresh session uses --no-daemon when supported" {
+  _enable_fake_codex_no_daemon
+  bash "$SCRIPTS/join.sh" cxteam existing codex "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"; run cat "$boot"
+  [[ "$output" == *"codex --no-daemon"* ]]
+}
+
+@test "spawn: codex omits --no-daemon when unsupported" {
+  bash "$SCRIPTS/join.sh" cxteam existing codex "$PROJ"
+  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"; run cat "$boot"
+  [[ "$output" != *"--no-daemon"* ]]
+}
+
+@test "spawn: codex monitor mode does not add --no-daemon" {
+  _enable_fake_codex_no_daemon
+  bash "$SCRIPTS/join.sh" cxteam existing codex "$PROJ"
+  bash "$SCRIPTS/delivery.sh" set monitor codex "$PROJ" >/dev/null
+  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"; run cat "$boot"
+  [[ "$output" != *"--no-daemon"* ]]
 }
 
 @test "spawn: codex boots fresh when no rollout backs the record (#339)" {
