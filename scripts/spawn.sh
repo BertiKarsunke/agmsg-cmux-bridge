@@ -49,11 +49,11 @@ set -euo pipefail
 #                      through to the CLI unchecked (the CLI rejects unknown
 #                      ids); the flag spelling comes from the type's manifest
 #                      `model_arg=`. Refused for a type with no model_arg.
-#   --fresh            force a brand-new session even when the role has a
-#                      resumable prior session. Without it, a type that supports
-#                      resume (manifest `resume_arg=`) is brought back into its
-#                      last session's context when that transcript still exists
-#                      (#339); with it, spawn always boots fresh.
+#   --resume           bring the role back into its last session's context
+#                      when the type supports resume (manifest `resume_arg=`)
+#                      and that transcript still exists (#339). Without it,
+#                      spawn always boots a brand-new session.
+#   --fresh            accepted for compatibility; fresh is the default.
 #
 # Spawn options: extra CLI args to always pass a given type's launched
 # binary (e.g. a default permission mode or sandbox policy), configured
@@ -142,7 +142,7 @@ TERMINAL_TMPL=""     # --terminal override (resolved below if empty)
 WAIT_READY=1         # block until the spawned agent's watcher attaches
 READY_TIMEOUT=90     # seconds to wait for readiness before giving up
 MODEL_ID=""          # --model: pass-through model id for the launched CLI
-FRESH=0              # --fresh: force a fresh session even if the role is resumable
+FRESH=1              # default fresh; --resume opts into the role's prior session
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -160,6 +160,7 @@ while [ $# -gt 0 ]; do
     --ready-timeout) READY_TIMEOUT="${2:?--ready-timeout needs seconds}"; shift 2 ;;
     --model) MODEL_ID="${2:?--model needs a model id}"; shift 2 ;;
     --fresh) FRESH=1; shift ;;
+    --resume) FRESH=0; shift ;;
     *) die "unknown option: $1" ;;
   esac
 done

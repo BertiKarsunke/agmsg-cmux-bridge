@@ -321,17 +321,27 @@ seed_resumable() {
   fi
 }
 
-@test "spawn: resumes the role's prior session when record + transcript exist (#339)" {
+@test "spawn: --resume resumes the role's prior session when record + transcript exist (#339)" {
   bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
   seed_resumable myteam alice "sess-uuid-1" "$PROJ" 1
 
-  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait --resume
   [ "$status" -eq 0 ]
   boot="$(cat "$CAPTURE")"; run cat "$boot"
   # Resumed by uuid, still named after the role, still runs the actas prompt.
   [[ "$output" == *"--resume sess-uuid-1"* ]]
   [[ "$output" == *"-n myteam-alice"* ]]
   [[ "$output" == *"actas"* ]]
+}
+
+@test "spawn: boots fresh by default even when resumable" {
+  bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
+  seed_resumable myteam alice "sess-uuid-1" "$PROJ" 1
+
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  [ "$status" -eq 0 ]
+  boot="$(cat "$CAPTURE")"; run cat "$boot"
+  [[ "$output" != *"--resume"* ]]
 }
 
 @test "spawn: --fresh forces a fresh session even when resumable (#339)" {
@@ -349,7 +359,7 @@ seed_resumable() {
   bash "$SCRIPTS/join.sh" myteam existing claude-code "$PROJ"
   seed_resumable myteam alice "sess-uuid-1" "$PROJ" 0   # record only, no transcript
 
-  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait
+  run bash "$SCRIPTS/spawn.sh" claude-code alice --project "$PROJ" --no-wait --resume
   [ "$status" -eq 0 ]
   boot="$(cat "$CAPTURE")"; run cat "$boot"
   [[ "$output" != *"--resume"* ]]
@@ -369,7 +379,7 @@ seed_resumable() {
   bash "$SCRIPTS/join.sh" gteam existing gemini "$PROJ"
   seed_resumable gteam bob "sess-uuid-9" "$PROJ" 1
 
-  run bash "$SCRIPTS/spawn.sh" gemini bob --project "$PROJ" --no-wait
+  run bash "$SCRIPTS/spawn.sh" gemini bob --project "$PROJ" --no-wait --resume
   [ "$status" -eq 0 ]
   boot="$(cat "$CAPTURE")"; run cat "$boot"
   [[ "$output" != *"--resume"* ]]
@@ -386,7 +396,7 @@ seed_resumable() {
   mkdir -p "$HOME/.codex/sessions/2026/07/05"
   : > "$HOME/.codex/sessions/2026/07/05/rollout-2026-07-05T10-00-00-cx-uuid-1.jsonl"
 
-  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait
+  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait --resume
   [ "$status" -eq 0 ]
   boot="$(cat "$CAPTURE")"; run cat "$boot"
   # Subcommand shape: `codex resume cx-uuid-1 ...` -- resume token right after cli.
@@ -430,7 +440,7 @@ seed_resumable() {
   source "$SCRIPTS/lib/role-session.sh"
   agmsg_role_session_record cxteam bob "cx-uuid-gone" "$PROJ" codex   # record, no rollout
 
-  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait
+  run bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --no-wait --resume
   [ "$status" -eq 0 ]
   boot="$(cat "$CAPTURE")"; run cat "$boot"
   [[ "$output" != *"resume"* ]]

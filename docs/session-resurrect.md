@@ -10,7 +10,7 @@ it. The moment a session `actas`'s a role, agmsg records `(team, agent) → sess
 (an advisory file under the skill's `run/` directory). Two things consume that
 record:
 
-- **`spawn`** resumes a role's recorded session by default (see
+- **`spawn --resume`** resumes a role's recorded session (spawn is fresh by default; see
   [actas.md](actas.md) for the multi-role model `spawn` builds on).
 - the **tmux-resurrect hook** re-seats each role pane into its session after a
   tmux-server restart.
@@ -112,8 +112,8 @@ if you need the exact uuid (these are advisory state; only read them, never edit
   active FROM. `spawn` and the hook pass the `actas` prompt automatically; a
   manual `--resume` needs the `actas` step yourself (a role-aware SessionStart
   directive prompts for it).
-- **`--fresh`** on `spawn` forces a brand-new session even when the role is
-  resumable.
+- **`spawn` boots fresh by default.** Pass `--resume` to bring the role back
+  into its last session; `--fresh` is still accepted and is a no-op.
 - **Untrusted directory.** Resuming into a directory the CLI hasn't seen before
   shows its "trust this folder?" prompt before it processes anything. Spawned and
   resurrected panes run in already-trusted project directories, so this only

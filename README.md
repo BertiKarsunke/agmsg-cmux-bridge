@@ -183,9 +183,9 @@ Despawn only acts on the named member — the session running `despawn` is never
 ### Bring a role back with its context (session resume)
 
 A role remembers the session that last embodied it: sessions are named
-`<team>-<agent>`, and `spawn` **resumes a role's previous session by default** —
-so re-spawning after a `despawn`, crash, or restart comes back in the prior
-conversation, not blank (`--fresh` forces new). With
+`<team>-<agent>`, and `spawn` **boots a brand-new session by default**; pass
+`--resume` to bring a role back into its prior conversation after a `despawn`,
+crash, or restart. With
 [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect), one `~/.tmux.conf`
 line re-seats every role pane into its session after a tmux-server restart.
 
