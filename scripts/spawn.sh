@@ -660,13 +660,21 @@ launch_in_cmux() {
     boot_cmd="export AGMSG_PANE_SELF=$surface_uuid CMUX_SURFACE_ID=$surface_uuid; exec $BOOT"
   fi
 
-  if [ -n "$workspace_id" ]; then
-    cmux respawn-pane --surface "$surface_ref" --workspace "$workspace_id" --command "$boot_cmd" >/dev/null \
-      || die "cmux respawn-pane failed for $surface_ref"
-  else
-    cmux respawn-pane --surface "$surface_ref" --command "$boot_cmd" >/dev/null \
-      || die "cmux respawn-pane failed for $surface_ref"
-  fi
+  # cmux registers a freshly split surface asynchronously, so an immediate
+  # respawn-pane can fail with "Surface ref not found". Retry briefly; on final
+  # failure close the orphan split so a caller's retry doesn't stack an extra
+  # empty shell pane.
+  local ws_args=() _try
+  [ -n "$workspace_id" ] && ws_args=(--workspace "$workspace_id")
+  # ponytail: fixed ~5s budget (25 x 0.2s); make it tunable if cmux gets slower.
+  for _try in $(seq 1 25); do
+    cmux respawn-pane --surface "$surface_ref" ${ws_args[@]+"${ws_args[@]}"} --command "$boot_cmd" >/dev/null 2>&1 && break
+    if [ "$_try" -eq 25 ]; then
+      cmux close-surface --surface "$surface_ref" ${ws_args[@]+"${ws_args[@]}"} >/dev/null 2>&1 || true
+      die "cmux respawn-pane failed for $surface_ref"
+    fi
+    sleep 0.2
+  done
   # Record placement by UUID (stable) when we have it; short refs can shift.
   record_spawn_placement "cmux:${surface_uuid:-$surface_ref}"
   record_spawn_pane_registry cmux "${surface_uuid:-$surface_ref}"

@@ -64,7 +64,19 @@ case "\$cmd" in
     esac
     ;;
   respawn-pane)
+    # FAKE_CMUX_RESPAWN_FAILS=N: fail the first N calls ("Surface ref not found").
+    fails="\$TEST_SKILL_DIR/run/fake-cmux-respawn-fails"
+    f=0; [ ! -f "\$fails" ] || f="\$(cat "\$fails")"
+    if [ "\$f" -lt "\${FAKE_CMUX_RESPAWN_FAILS:-0}" ]; then
+      printf '%s\n' "\$((f + 1))" > "\$fails"
+      echo "Error: Surface ref not found" >&2
+      exit 1
+    fi
     printf '%s\n' "\$*" >> "\$TEST_SKILL_DIR/run/fake-cmux-respawn-args"
+    exit 0
+    ;;
+  close-surface)
+    printf '%s\n' "\$*" >> "\$TEST_SKILL_DIR/run/fake-cmux-closed"
     exit 0
     ;;
   read-screen|send|send-key)
@@ -810,6 +822,30 @@ YAML
   [[ "$output" == *"codex"* ]]
   [[ "$output" == *"actas"* ]]
   [[ "$output" == *"reviewer"* ]]
+}
+
+@test "spawn: cmux retries respawn-pane while a new surface is not yet registered" {
+  local parent="AAAAAAAA-0000-4000-8000-000000000000"
+  _install_fake_cmux_spawn
+  mkdir -p "$TEST_SKILL_DIR/run"
+  AGMSG_PANE_BACKEND=none bash "$SCRIPTS/join.sh" myteam existing codex "$PROJ"
+  run env -u TMUX -u AGMSG_TERMINAL FAKE_CMUX_RESPAWN_FAILS=3 AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF="$parent" \
+    bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --team myteam --no-wait
+  [ "$status" -eq 0 ]
+  grep -Fq "AGMSG_PANE_SELF=BBBBBBBB-1111-4111-8111-111111111111" "$TEST_SKILL_DIR/run/fake-cmux-respawn-args"
+  [ ! -f "$TEST_SKILL_DIR/run/fake-cmux-closed" ]
+}
+
+@test "spawn: cmux closes the orphan split when respawn-pane keeps failing" {
+  local parent="AAAAAAAA-0000-4000-8000-000000000000"
+  _install_fake_cmux_spawn
+  mkdir -p "$TEST_SKILL_DIR/run"
+  AGMSG_PANE_BACKEND=none bash "$SCRIPTS/join.sh" myteam existing codex "$PROJ"
+  run env -u TMUX -u AGMSG_TERMINAL FAKE_CMUX_RESPAWN_FAILS=999 AGMSG_PANE_BACKEND=cmux AGMSG_PANE_SELF="$parent" \
+    bash "$SCRIPTS/spawn.sh" codex bob --project "$PROJ" --team myteam --no-wait
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"respawn-pane failed"* ]]
+  grep -Fq "surface:7" "$TEST_SKILL_DIR/run/fake-cmux-closed"
 }
 
 @test "spawn: consecutive cmux spawns synchronously register distinct child surfaces" {
